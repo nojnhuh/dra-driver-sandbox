@@ -4,12 +4,11 @@ FROM golang AS build
 WORKDIR /workspace
 
 COPY . .
-RUN --mount=type=cache,target=/root/cache/go-build \
+RUN --mount=type=cache,target=/root/.cache/go-build \
     --mount=type=cache,target=/go/pkg/mod \
     CGO_ENABLED=0 go build ./cmd/dra-driver-template
 
 FROM scratch
 
 COPY --from=build /workspace/dra-driver-template /
-USER 65532
 ENTRYPOINT ["/dra-driver-template"]

@@ -3,17 +3,28 @@ package main
 import (
 	"context"
 	"flag"
-	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 
+	"github.com/nojnhuh/dra-driver-template/internal/driver"
 	"github.com/spf13/cobra"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/dynamic-resource-allocation/kubeletplugin"
 	"k8s.io/klog/v2"
 )
 
-func main() {
-	ctx := context.Background()
+var (
+	kubeletPluginDataDirectoryPath string
+	kubeletRegistrarDirectoryPath  string
+	nodeName                       string
+	podUID                         string
+)
+
+func run() int {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
 	configOverrides := &clientcmd.ConfigOverrides{}
@@ -25,6 +36,7 @@ func main() {
 			defer klog.Flush()
 
 			logger.Info("Starting")
+			defer logger.Info("Stopping")
 
 			kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(loadingRules, configOverrides)
 			config, err := kubeConfig.ClientConfig()
@@ -36,15 +48,10 @@ func main() {
 				return nil
 			}
 
-			namespaces, err := clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
-			if err != nil {
-				return fmt.Errorf("list namespaces: %w", err)
-			}
-			for _, namespace := range namespaces.Items {
-				logger.Info("Found Namespace", "namespace", namespace.Name)
-			}
+			nodeName = os.Getenv("NODE_NAME")
+			podUID = os.Getenv("POD_UID")
 
-			return nil
+			return driver.Run(ctx, clientset, kubeletPluginDataDirectoryPath, kubeletRegistrarDirectoryPath, nodeName, podUID)
 		},
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -55,13 +62,21 @@ func main() {
 	klog.InitFlags(klogFlags)
 	cmd.Flags().AddGoFlagSet(klogFlags)
 
+	cmd.Flags().StringVar(&kubeletPluginDataDirectoryPath, "kubelet-plugin-data-directory-path", kubeletplugin.KubeletPluginsDir, "Path to the kubelet's plugins directory")
+	cmd.Flags().StringVar(&kubeletRegistrarDirectoryPath, "kubelet-registrar-directory-path", kubeletplugin.KubeletRegistryDir, "Path to the kubelet's plugins registry directory")
+
 	logger := klog.NewKlogr()
 	ctx = klog.NewContext(ctx, logger)
 
-	var exit int
+	defer logger.Info("Stopped gracefully")
+
 	if err := cmd.ExecuteContext(ctx); err != nil {
-		logger.Error(err, "Executing command failed")
-		exit = 1
+		logger.Error(err, "Execution failed")
+		return 1
 	}
-	klog.FlushAndExit(klog.ExitFlushTimeout, exit)
+	return 0
+}
+
+func main() {
+	klog.FlushAndExit(klog.ExitFlushTimeout, run())
 }
