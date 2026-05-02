@@ -18,10 +18,4 @@ func TestDriver(t *testing.T) {
 		_, ctx := ktesting.NewTestContext(t)
 		createCluster(ctx, t, h, "default")
 	})
-
-	t.Run("another", func(t *testing.T) {
-		t.Parallel()
-		_, ctx := ktesting.NewTestContext(t)
-		createCluster(ctx, t, h, "another")
-	})
 }

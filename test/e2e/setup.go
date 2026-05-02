@@ -3,8 +3,10 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"flag"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
@@ -17,32 +19,51 @@ import (
 	"helm.sh/helm/v4/pkg/chart/loader"
 	"helm.sh/helm/v4/pkg/cli"
 	"helm.sh/helm/v4/pkg/kube"
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	applyv1 "k8s.io/client-go/applyconfigurations/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	capiclient "sigs.k8s.io/cluster-api/cmd/clusterctl/client"
 	capiconfig "sigs.k8s.io/cluster-api/cmd/clusterctl/client/config"
+	"sigs.k8s.io/cluster-api/util"
+	"sigs.k8s.io/cluster-api/util/conditions"
+	capiyaml "sigs.k8s.io/cluster-api/util/yaml"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 	kindv1 "sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 	kind "sigs.k8s.io/kind/pkg/cluster"
+	"sigs.k8s.io/kustomize/api/krusty"
+	"sigs.k8s.io/kustomize/api/types"
+	"sigs.k8s.io/kustomize/kyaml/filesys"
+	"sigs.k8s.io/yaml"
 )
 
 var (
-	bootstrapClusterName = "dra-driver-template"
+	bootstrapClusterName  = "dra-driver-template"
+	skipCleanup           = false
+	driverManifestDirPath = filepath.Join("..", "..", "deploy")
+	driverImage           = "dra-driver-template:latest"
 )
 
 func init() {
 	flag.StringVar(&bootstrapClusterName, "bootstrap-cluster-name", bootstrapClusterName, "name for the kind cluster used to manage Cluster API clusters")
+	flag.BoolVar(&skipCleanup, "skip-cleanup", skipCleanup, "Do not delete anything that was created during the test")
+	flag.StringVar(&driverManifestDirPath, "driver-manifest-dir-path", driverManifestDirPath, "path to the directory containing YAML files defining the driver")
+	flag.StringVar(&driverImage, "driver-image", driverImage, "Full name of the DRA driver's container image")
 }
 
-var kindBootstrap *kind.Provider
+var (
+	kindBootstrap     *kind.Provider
+	managedFieldOwner = "dra-driver-template-e2e"
+)
 
 type clusterHandle struct {
 	// Path to the kubeconfig
@@ -74,6 +95,9 @@ func createManagementCluster(ctx context.Context, t *testing.T) clusterHandle {
 		t.Fatal("Error creating management cluster:", err)
 	}
 	t.Cleanup(func() {
+		if skipCleanup {
+			return
+		}
 		logger.V(4).Info("deleting management cluster")
 		err := kindBootstrap.Delete(bootstrapClusterName, "")
 		if err != nil {
@@ -190,6 +214,8 @@ func createManagementCluster(ctx context.Context, t *testing.T) clusterHandle {
 func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name string) clusterHandle {
 	logger := klog.FromContext(ctx)
 
+	clusterNamespace := "default"
+
 	// Create a new in-memory reader independent from other tests running in
 	// parallel.
 	capiConfigReader := capiconfig.NewMemoryReader()
@@ -210,17 +236,48 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 		ProviderRepositorySource: &capiclient.ProviderRepositorySourceOptions{
 			Flavor: "development",
 		},
-		KubernetesVersion: "v1.35.1",
+		KubernetesVersion:  "v1.35.1",
+		WorkerMachineCount: new(int64(1)),
 	})
 	if err != nil {
 		t.Fatal("Error getting CAPI template:", err)
 	}
+	templateYAML, err := template.Yaml()
+	if err != nil {
+		t.Fatal("Error getting YAML for cluster template:", err)
+	}
+
+	clusterKustomization := &types.Kustomization{
+		Patches: []types.Patch{
+			{
+				Patch: fmt.Sprintf(`{
+					"apiVersion": "infrastructure.cluster.x-k8s.io/v1beta2",
+					"kind": "DockerMachineTemplate",
+					"metadata": {
+						"name": "quick-start-%s-worker-machinetemplate",
+						"namespace": "%s"
+					},
+					"spec": {
+						"template": {
+							"spec": {
+								"preLoadImages": ["%s"]
+							}
+						}
+					}
+				}`, clusterNamespace, clusterNamespace, driverImage),
+			},
+		},
+	}
+	kustomizedCluster, err := kustomizeYAML(templateYAML, clusterKustomization)
+	if err != nil {
+		t.Fatal("Error running kustomize for cluster template:", err)
+	}
 
 	err = wait.PollUntilContextTimeout(ctx, 10*time.Second, 1*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
-		for _, obj := range template.Objs() {
-			err := h.client.Apply(ctx, ctrlclient.ApplyConfigurationFromUnstructured(&obj), ctrlclient.FieldOwner("dra-driver-template-e2e"))
+		for _, obj := range kustomizedCluster {
+			err := h.client.Apply(ctx, ctrlclient.ApplyConfigurationFromUnstructured(&obj), ctrlclient.FieldOwner(managedFieldOwner))
 			// API server returns 500 when webhooks are unreachable
-			if errors.IsInternalError(err) {
+			if apierrors.IsInternalError(err) {
 				return false, nil
 			}
 			if err != nil {
@@ -233,10 +290,13 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 		t.Fatal("Error applying cluster template:", err)
 	}
 	t.Cleanup(func() {
+		if skipCleanup {
+			return
+		}
 		cluster := &clusterv1.Cluster{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
-				Namespace: "default",
+				Namespace: clusterNamespace,
 			},
 		}
 		err := h.client.Delete(ctx, cluster)
@@ -246,7 +306,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 		}
 		err = wait.PollUntilContextTimeout(ctx, 5*time.Second, 5*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
 			err := h.client.Get(ctx, ctrlclient.ObjectKeyFromObject(cluster), &clusterv1.Cluster{}, &ctrlclient.GetOptions{})
-			if !errors.IsNotFound(err) {
+			if !apierrors.IsNotFound(err) {
 				return false, err
 			}
 			return true, nil
@@ -257,22 +317,15 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 		}
 	})
 
-	err = wait.PollUntilContextTimeout(ctx, 5*time.Second, 5*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
-		cluster := new(clusterv1.Cluster)
-		err := h.client.Get(ctx, ctrlclient.ObjectKey{Name: name, Namespace: "default" /*TODO*/}, cluster, &ctrlclient.GetOptions{})
+	err = wait.PollUntilContextTimeout(ctx, 1*time.Second, 2*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
+		cluster, err := util.GetClusterByName(ctx, h.client, clusterNamespace, name)
 		if err != nil {
-			return false, err
+			t.Fatalf("Error getting Cluster %s: %v", name, err)
 		}
-		for _, cond := range cluster.Status.Conditions {
-			if cond.Type == clusterv1.AvailableCondition &&
-				cond.Status == metav1.ConditionTrue {
-				return true, nil
-			}
-		}
-		return false, nil
+		return conditions.IsTrue(cluster, clusterv1.ClusterControlPlaneInitializedCondition), nil
 	})
 	if err != nil {
-		t.Fatal("Error waiting for Clusters to become Available:", err)
+		t.Fatal("Error waiting for ControlPlane to initialize:", err)
 	}
 
 	kubeConfigFile, err := os.Create(filepath.Join(t.TempDir(), "kubeconfig"))
@@ -300,14 +353,16 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 		t.Fatal("Error building Kubernetes client:", err)
 	}
 
+	privileged := map[string]string{
+		"pod-security.kubernetes.io/enforce": "privileged",
+		"pod-security.kubernetes.io/audit":   "privileged",
+		"pod-security.kubernetes.io/warn":    "privileged",
+	}
+
 	tigeraOperator := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "tigera-operator",
-			Labels: map[string]string{
-				"pod-security.kubernetes.io/enforce": "privileged",
-				"pod-security.kubernetes.io/audit":   "privileged",
-				"pod-security.kubernetes.io/warn":    "privileged",
-			},
+			Name:   "tigera-operator",
+			Labels: privileged,
 		},
 	}
 	err = client.Create(ctx, tigeraOperator)
@@ -315,6 +370,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 		t.Fatalf("Error creating %s namespace: %v", tigeraOperator.Name, err)
 	}
 
+	logger.V(3).Info("Installing CNI")
 	helmEnv := cli.New()
 	helmConfig := action.NewConfiguration(action.ConfigurationSetLogger(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelDebug})))
 	helmConfigFlags := genericclioptions.NewConfigFlags(false)
@@ -356,13 +412,131 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 	if err != nil {
 		t.Fatal("Error loading Calico chart:", err)
 	}
-	_, err = calicoInstall.RunWithContext(ctx, calicoChart, nil)
+	_, err = calicoInstall.RunWithContext(ctx, calicoChart, map[string]any{
+		"goldmane": map[string]any{"enabled": false},
+		"whisker":  map[string]any{"enabled": false},
+	})
 	if err != nil {
 		t.Fatal("Error installing Calico chart:", err)
 	}
+
+	// wait for CAPI ControlPlane, MachineDeployments, MachinePools
+	err = wait.PollUntilContextTimeout(ctx, 1*time.Second, 2*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
+		cluster, err := util.GetClusterByName(ctx, h.client, clusterNamespace, name)
+		if err != nil {
+			t.Fatalf("Error getting Cluster %s: %v", name, err)
+		}
+		return conditions.IsTrue(cluster, clusterv1.ClusterControlPlaneMachinesReadyCondition) &&
+			conditions.IsTrue(cluster, clusterv1.ClusterWorkerMachinesReadyCondition), nil
+	})
+
+	// TODO: here Calico has initialized enough for the Nodes to become Ready,
+	// but some of its Pods still are not Ready. Do we need to wait for those?
+
+	logger.V(3).Info("Installing DRA driver")
+	driverNamespace := "default"
+	driverManifests, err := os.ReadDir(driverManifestDirPath)
+	if err != nil {
+		t.Fatalf("Error reading %s: %v", driverManifestDirPath, err)
+	}
+	var driverResources bytes.Buffer
+	for _, driverManifest := range driverManifests {
+		func() {
+			path := filepath.Join(driverManifestDirPath, driverManifest.Name())
+			driverManifestFile, err := os.Open(path)
+			if err != nil {
+				t.Fatalf("Error opening %s: %v", path, err)
+			}
+			defer driverManifestFile.Close()
+
+			manifestData, err := io.ReadAll(driverManifestFile)
+			if err != nil {
+				t.Fatalf("Error reading %s: %v", path, err)
+			}
+			_, err = driverResources.Write(manifestData)
+			if err != nil {
+				t.Fatalf("Error writing buffer: %v", err)
+			}
+			_, err = driverResources.WriteString("\n---\n")
+			if err != nil {
+				t.Fatalf("Error writing buffer: %v", err)
+			}
+		}()
+	}
+	driverKustomization := &types.Kustomization{
+		Namespace: driverNamespace,
+	}
+	kustomizedDriver, err := kustomizeYAML(driverResources.Bytes(), driverKustomization)
+	if err != nil {
+		t.Fatal("Error running kustomize for driver manifests:", err)
+	}
+
+	err = client.Apply(ctx, applyv1.Namespace(driverNamespace).WithLabels(privileged), ctrlclient.FieldOwner(managedFieldOwner))
+	if err != nil {
+		t.Fatal("Error applying driver namespace:", err)
+	}
+	for _, obj := range kustomizedDriver {
+		logger.V(4).Info("Creating driver resource", "apiVersion", obj.GetAPIVersion(), "kind", obj.GetKind(), "namespace", obj.GetNamespace(), "name", obj.GetName())
+		err = client.Apply(ctx, ctrlclient.ApplyConfigurationFromUnstructured(&obj), ctrlclient.FieldOwner(managedFieldOwner))
+		if err != nil {
+			t.Fatalf("Error applying %s %s/%s: %v", obj.GetKind(), obj.GetNamespace(), obj.GetName(), err)
+		}
+	}
+	err = wait.PollUntilContextTimeout(ctx, 1*time.Second, 60*time.Second, true /*immediate*/, func(ctx context.Context) (bool, error) {
+		daemonSets := new(appsv1.DaemonSetList)
+		err := client.List(
+			ctx,
+			daemonSets,
+			ctrlclient.InNamespace(driverNamespace),
+			ctrlclient.HasLabels{
+				"app.kubernetes.io/name=dra-driver-template",
+				"app.kubernetes.io/component=kubeletplugin",
+			},
+		)
+		if err != nil {
+			return false, err
+		}
+		for _, ds := range daemonSets.Items {
+			if ds.Generation != ds.Status.ObservedGeneration ||
+				ds.Status.CurrentNumberScheduled < ds.Status.DesiredNumberScheduled ||
+				ds.Status.NumberReady < ds.Status.DesiredNumberScheduled {
+				return false, nil
+			}
+		}
+		return true, nil
+	})
 
 	return clusterHandle{
 		kubeConfig: kubeConfigFile.Name(),
 		client:     client,
 	}
+}
+
+func kustomizeYAML(input []byte, k *types.Kustomization) ([]unstructured.Unstructured, error) {
+	kustomizeFiles := filesys.MakeFsInMemory()
+	if err := kustomizeFiles.WriteFile("/resources.yaml", input); err != nil {
+		return nil, err
+	}
+	if k.Resources == nil {
+		k.Resources = []string{"/resources.yaml"}
+	}
+	kyaml, err := yaml.Marshal(k)
+	if err != nil {
+		return nil, err
+	}
+	if err := kustomizeFiles.WriteFile("/kustomization.yaml", kyaml); err != nil {
+		return nil, err
+	}
+
+	kustomizer := krusty.MakeKustomizer(krusty.MakeDefaultOptions())
+	resMap, err := kustomizer.Run(kustomizeFiles, "/")
+	if err != nil {
+		return nil, err
+	}
+	resYAML, err := resMap.AsYaml()
+	if err != nil {
+		return nil, err
+	}
+	u, err := capiyaml.ToUnstructured(resYAML)
+	return u, err
 }
