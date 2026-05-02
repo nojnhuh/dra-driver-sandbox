@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/spf13/pflag"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/runtime"
@@ -16,6 +17,20 @@ import (
 )
 
 const driverName = "template.example.com"
+
+type Options struct {
+	KubeletPluginDataDirectoryPath string
+	KubeletRegistrarDirectoryPath  string
+	NodeName                       string
+	PodUID                         string
+}
+
+func (o *Options) AddFlags(flags *pflag.FlagSet) {
+	flags.StringVar(&o.KubeletPluginDataDirectoryPath, "kubelet-plugin-data-directory-path", kubeletplugin.KubeletPluginsDir, "Path to the kubelet's plugins directory")
+	flags.StringVar(&o.KubeletRegistrarDirectoryPath, "kubelet-registrar-directory-path", kubeletplugin.KubeletRegistryDir, "Path to the kubelet's plugins registry directory")
+	flags.StringVar(&o.NodeName, "node-name", os.Getenv("NODE_NAME"), "Name of the Node where the driver is running")
+	flags.StringVar(&o.PodUID, "pod-uid", os.Getenv("POD_UID"), "UID of the Pod in which the driver is running")
+}
 
 type driver struct {
 	helper *kubeletplugin.Helper
@@ -32,14 +47,14 @@ type fatalError struct {
 // initialization fails for a fatal background error occurs, then that error is
 // returned. Other causes for canceling the context cause Run to return no
 // error.
-func Run(ctx context.Context, clientset kubernetes.Interface, kubeletPluginDataDirectoryPath, kubeletRegistrarDirectoryPath, nodeName, podUID string) error {
+func Run(ctx context.Context, clientset kubernetes.Interface, opts Options) error {
 	ctx, cancel := context.WithCancelCause(ctx)
 
 	d := &driver{
 		cancel: cancel,
 	}
 
-	err := os.MkdirAll(filepath.Join(kubeletPluginDataDirectoryPath, driverName), 0750)
+	err := os.MkdirAll(filepath.Join(opts.KubeletPluginDataDirectoryPath, driverName), 0750)
 	if err != nil {
 		return fmt.Errorf("create kubelet plugin data directory path: %w", err)
 	}
@@ -47,10 +62,10 @@ func Run(ctx context.Context, clientset kubernetes.Interface, kubeletPluginDataD
 	d.helper, err = kubeletplugin.Start(ctx, d,
 		kubeletplugin.KubeClient(clientset),
 		kubeletplugin.DriverName(driverName),
-		kubeletplugin.PluginDataDirectoryPath(kubeletPluginDataDirectoryPath),
-		kubeletplugin.RegistrarDirectoryPath(kubeletRegistrarDirectoryPath),
-		kubeletplugin.NodeName(nodeName),
-		kubeletplugin.RollingUpdate(types.UID(podUID)),
+		kubeletplugin.PluginDataDirectoryPath(opts.KubeletPluginDataDirectoryPath),
+		kubeletplugin.RegistrarDirectoryPath(opts.KubeletRegistrarDirectoryPath),
+		kubeletplugin.NodeName(opts.NodeName),
+		kubeletplugin.RollingUpdate(types.UID(opts.PodUID)),
 	)
 	if err != nil {
 		return fmt.Errorf("start kubelet plugin: %w", err)

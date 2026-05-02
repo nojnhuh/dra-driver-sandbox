@@ -11,20 +11,14 @@ import (
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/dynamic-resource-allocation/kubeletplugin"
 	"k8s.io/klog/v2"
-)
-
-var (
-	kubeletPluginDataDirectoryPath string
-	kubeletRegistrarDirectoryPath  string
-	nodeName                       string
-	podUID                         string
 )
 
 func run() int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	var driverOpts driver.Options
 
 	loadingRules := clientcmd.NewDefaultClientConfigLoadingRules()
 	configOverrides := &clientcmd.ConfigOverrides{}
@@ -48,10 +42,7 @@ func run() int {
 				return nil
 			}
 
-			nodeName = os.Getenv("NODE_NAME")
-			podUID = os.Getenv("POD_UID")
-
-			return driver.Run(ctx, clientset, kubeletPluginDataDirectoryPath, kubeletRegistrarDirectoryPath, nodeName, podUID)
+			return driver.Run(ctx, clientset, driverOpts)
 		},
 		SilenceErrors: true,
 		SilenceUsage:  true,
@@ -62,8 +53,7 @@ func run() int {
 	klog.InitFlags(klogFlags)
 	cmd.Flags().AddGoFlagSet(klogFlags)
 
-	cmd.Flags().StringVar(&kubeletPluginDataDirectoryPath, "kubelet-plugin-data-directory-path", kubeletplugin.KubeletPluginsDir, "Path to the kubelet's plugins directory")
-	cmd.Flags().StringVar(&kubeletRegistrarDirectoryPath, "kubelet-registrar-directory-path", kubeletplugin.KubeletRegistryDir, "Path to the kubelet's plugins registry directory")
+	driverOpts.AddFlags(cmd.Flags())
 
 	logger := klog.NewKlogr()
 	ctx = klog.NewContext(ctx, logger)
