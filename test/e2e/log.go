@@ -3,8 +3,11 @@
 package e2e
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
 	"strings"
+	"testing"
 
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/kind/pkg/log"
@@ -51,4 +54,12 @@ func (k kindInfoLogAdapter) Info(message string) {
 // Infof implements [log.InfoLogger].
 func (k kindInfoLogAdapter) Infof(format string, args ...any) {
 	k.Logger.WithCallDepth(2).Info(fmt.Sprintf(strings.TrimSpace(format), args...))
+}
+
+func helmLogger(ctx context.Context, t *testing.T) slog.Handler {
+	level := slog.LevelInfo
+	if klog.FromContext(ctx).V(6).Enabled() {
+		level = slog.LevelDebug
+	}
+	return slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: level})
 }

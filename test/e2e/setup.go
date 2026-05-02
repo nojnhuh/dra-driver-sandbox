@@ -8,7 +8,6 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -372,7 +371,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 
 	logger.V(3).Info("Installing CNI")
 	helmEnv := cli.New()
-	helmConfig := action.NewConfiguration(action.ConfigurationSetLogger(slog.NewTextHandler(t.Output(), &slog.HandlerOptions{Level: slog.LevelDebug})))
+	helmConfig := action.NewConfiguration(action.ConfigurationSetLogger(helmLogger(ctx, t)))
 	helmConfigFlags := genericclioptions.NewConfigFlags(false)
 	helmConfigFlags.KubeConfig = new(kubeConfigFile.Name())
 	helmConfig.Init(helmConfigFlags, tigeraOperator.Name, "")
