@@ -26,11 +26,11 @@ kind: ResourceClaim
 metadata:
   name: one-device
 spec:
-    devices:
-      requests:
-      - name: dev
-        exactly:
-          deviceClassName: test.template.example.com
+  devices:
+    requests:
+    - name: dev
+      exactly:
+        deviceClassName: test.template.example.com
 ---
 apiVersion: v1
 kind: Pod

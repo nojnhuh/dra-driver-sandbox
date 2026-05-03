@@ -17,10 +17,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-const (
-	driverName      = "template.example.com"
-	templateDataKey = "devices"
-)
+const driverName = "template.example.com"
 
 type Options struct {
 	KubeletPluginDataDirectoryPath string

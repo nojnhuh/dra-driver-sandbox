@@ -23,6 +23,11 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
+const (
+	templateDevicesKey        = "devices"
+	templateSharedCountersKey = "sharedCounters"
+)
+
 type resourcesController struct {
 	wg              sync.WaitGroup
 	informer        cache.SharedIndexInformer
@@ -118,18 +123,20 @@ func (c *resourcesController) syncResources(ctx context.Context) error {
 
 	var resourceSlices []resourceslice.Slice
 	for _, configMap := range configMaps {
-		templateData, ok := configMap.Data[templateDataKey]
-		if !ok {
-			return fmt.Errorf("ConfigMap %s/%s has no data at %s", configMap.Namespace, configMap.Name, templateDataKey)
-		}
-
 		var devices []resourcev1.Device
-		err = yaml.Unmarshal([]byte(templateData), &devices)
-		if err != nil {
-			return fmt.Errorf("unmarshal ConfigMap %s/%s data.%s: %w", configMap.Namespace, configMap.Name, templateDataKey, err)
+		if err := unmarshalConfigMapKey(configMap, templateDevicesKey, &devices); err != nil {
+			return err
 		}
 
-		resourceSlices = append(resourceSlices, resourceslice.Slice{Devices: devices})
+		var sharedCounters []resourcev1.CounterSet
+		if err := unmarshalConfigMapKey(configMap, templateSharedCountersKey, &sharedCounters); err != nil {
+			return err
+		}
+
+		resourceSlices = append(resourceSlices, resourceslice.Slice{
+			Devices:        devices,
+			SharedCounters: sharedCounters,
+		})
 	}
 
 	resources := resourceslice.DriverResources{
@@ -141,4 +148,16 @@ func (c *resourcesController) syncResources(ctx context.Context) error {
 	}
 
 	return c.helper.PublishResources(ctx, resources)
+}
+
+func unmarshalConfigMapKey(configMap *corev1.ConfigMap, key string, to any) error {
+	data, ok := configMap.Data[key]
+	if !ok {
+		return nil
+	}
+	err := yaml.Unmarshal([]byte(data), to)
+	if err != nil {
+		return fmt.Errorf("unmarshal ConfigMap %s/%s data.%s: %w", configMap.Namespace, configMap.Name, key, err)
+	}
+	return nil
 }
