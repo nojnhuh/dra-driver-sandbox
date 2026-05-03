@@ -12,4 +12,6 @@ rules:
 - apiGroups: ["resource.k8s.io"]
   resources: ["resourceslices"]
   verbs: ["list", "watch", "create", "update", "delete"]
-
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["list", "watch"]

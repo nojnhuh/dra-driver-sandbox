@@ -6,22 +6,27 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/spf13/pflag"
 	resourcev1 "k8s.io/api/resource/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/runtime"
+	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/dynamic-resource-allocation/kubeletplugin"
 	"k8s.io/klog/v2"
 )
 
-const driverName = "template.example.com"
+const (
+	driverName      = "template.example.com"
+	templateDataKey = "devices"
+)
 
 type Options struct {
 	KubeletPluginDataDirectoryPath string
 	KubeletRegistrarDirectoryPath  string
 	NodeName                       string
+	Namespace                      string
 	PodUID                         string
 }
 
@@ -29,12 +34,16 @@ func (o *Options) AddFlags(flags *pflag.FlagSet) {
 	flags.StringVar(&o.KubeletPluginDataDirectoryPath, "kubelet-plugin-data-directory-path", kubeletplugin.KubeletPluginsDir, "Path to the kubelet's plugins directory")
 	flags.StringVar(&o.KubeletRegistrarDirectoryPath, "kubelet-registrar-directory-path", kubeletplugin.KubeletRegistryDir, "Path to the kubelet's plugins registry directory")
 	flags.StringVar(&o.NodeName, "node-name", os.Getenv("NODE_NAME"), "Name of the Node where the driver is running")
+	flags.StringVar(&o.Namespace, "namespace", os.Getenv("NAMESPACE"), "Namespace where the driver is running")
 	flags.StringVar(&o.PodUID, "pod-uid", os.Getenv("POD_UID"), "UID of the Pod in which the driver is running")
 }
 
 type driver struct {
-	helper *kubeletplugin.Helper
-	cancel func(error)
+	helper    *kubeletplugin.Helper
+	cancel    func(error)
+	client    kubernetes.Interface
+	nodeName  string
+	namespace string
 }
 
 // fatalError represents an error that causes the driver to exit
@@ -48,10 +57,14 @@ type fatalError struct {
 // returned. Other causes for canceling the context cause Run to return no
 // error.
 func Run(ctx context.Context, clientset kubernetes.Interface, opts Options) error {
+	logger := klog.FromContext(ctx)
 	ctx, cancel := context.WithCancelCause(ctx)
 
 	d := &driver{
-		cancel: cancel,
+		cancel:    cancel,
+		client:    clientset,
+		nodeName:  opts.NodeName,
+		namespace: opts.Namespace,
 	}
 
 	err := os.MkdirAll(filepath.Join(opts.KubeletPluginDataDirectoryPath, driverName), 0750)
@@ -71,6 +84,17 @@ func Run(ctx context.Context, clientset kubernetes.Interface, opts Options) erro
 		return fmt.Errorf("start kubelet plugin: %w", err)
 	}
 	defer d.helper.Stop()
+
+	controller, err := startResourcesController(ctx, clientset, d.helper, d.nodeName)
+	if err != nil {
+		return fmt.Errorf("start driver resources controller: %w", err)
+	}
+	var wg sync.WaitGroup
+	defer wg.Wait()
+	wg.Go(func() {
+		defer logger.Info("Controller stopped")
+		controller.run(ctx)
+	})
 
 	<-ctx.Done()
 
@@ -107,7 +131,7 @@ func (d *driver) UnprepareResourceClaims(ctx context.Context, claims []kubeletpl
 
 // HandleError implements [kubeletplugin.DRAPlugin].
 func (d *driver) HandleError(ctx context.Context, err error, msg string) {
-	runtime.HandleErrorWithContext(ctx, err, msg)
+	utilruntime.HandleErrorWithContext(ctx, err, msg)
 	if !errors.Is(err, kubeletplugin.ErrRecoverable) {
 		d.cancel(fatalError{err})
 	}

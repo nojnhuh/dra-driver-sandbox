@@ -28,12 +28,16 @@ spec:
         image: dra-driver-template
         imagePullPolicy: Never
         args:
-          - -v=6
+          - -v=5
         env:
         - name: NODE_NAME
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
+        - name: NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
         - name: POD_UID
           valueFrom:
             fieldRef:
