@@ -16,7 +16,7 @@ metadata:
     sandbox.example.com/node-local-devices: ""
 data:
   devices: |
-    - name: dev0
+    - name: test0
       attributes:
         class:
           string: test

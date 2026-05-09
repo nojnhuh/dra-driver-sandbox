@@ -17,11 +17,11 @@ metadata:
     sandbox.example.com/node-local-devices: ""
 data:
   devices: |
-    - name: dev0
+    - name: ext0
       attributes:
         class:
           string: extended
-    - name: dev1
+    - name: ext1
       attributes:
         class:
           string: extended
