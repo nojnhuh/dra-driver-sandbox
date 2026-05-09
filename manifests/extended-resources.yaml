@@ -1,0 +1,48 @@
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: extended.sandbox.example.com
+spec:
+  selectors:
+  - cel:
+      expression: device.driver == "sandbox.example.com" &&
+        device.attributes["sandbox.example.com"].class == "extended"
+  extendedResourceName: sandbox.example.com/extended
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: extended-devices
+  labels:
+    sandbox.example.com/node-local-devices: ""
+data:
+  devices: |
+    - name: dev0
+      attributes:
+        class:
+          string: extended
+    - name: dev1
+      attributes:
+        class:
+          string: extended
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: extended
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: extended
+  template:
+    metadata:
+      labels:
+        app: extended
+    spec:
+      containers:
+      - name: ctr
+        image: registry.k8s.io/pause:3.10.1
+        resources:
+          limits:
+            sandbox.example.com/extended: 2

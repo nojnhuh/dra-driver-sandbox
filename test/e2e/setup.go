@@ -231,7 +231,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 		ProviderRepositorySource: &capiclient.ProviderRepositorySourceOptions{
 			Flavor: "development",
 		},
-		KubernetesVersion:  "v1.35.1",
+		KubernetesVersion:  "v1.36.0",
 		WorkerMachineCount: new(int64(1)),
 	})
 	if err != nil {

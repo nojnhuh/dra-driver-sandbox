@@ -41,6 +41,10 @@ func TestDriver(t *testing.T) {
 				name:     "partitionable",
 				manifest: "partitionable.yaml",
 			},
+			{
+				name:     "extended-resources",
+				manifest: "extended-resources.yaml",
+			},
 		}
 
 		for _, test := range tests {
