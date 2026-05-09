@@ -22,28 +22,37 @@ data:
           string: test
 ---
 apiVersion: resource.k8s.io/v1
-kind: ResourceClaim
+kind: ResourceClaimTemplate
 metadata:
   name: one-device
 spec:
-  devices:
-    requests:
-    - name: dev
-      exactly:
-        deviceClassName: test.sandbox.example.com
+  spec:
+    devices:
+      requests:
+      - name: dev
+        exactly:
+          deviceClassName: test.sandbox.example.com
 ---
-apiVersion: v1
-kind: Pod
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: pod
+  name: test
 spec:
-  containers:
-  - name: ctr
-    image: busybox
-    restartPolicy: Never
-    resources:
-      claims:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: test
+  template:
+    metadata:
+      labels:
+        app: test
+    spec:
+      containers:
+      - name: ctr
+        image: registry.k8s.io/pause:3.10.1
+        resources:
+          claims:
+          - name: claim
+      resourceClaims:
       - name: claim
-  resourceClaims:
-  - name: claim
-    resourceClaimName: one-device
+        resourceClaimTemplateName: one-device

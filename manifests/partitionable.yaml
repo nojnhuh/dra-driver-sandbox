@@ -1,0 +1,161 @@
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: partitionable.sandbox.example.com
+spec:
+  selectors:
+  - cel:
+      expression: device.driver == "sandbox.example.com" &&
+        device.attributes["sandbox.example.com"].class == "partitionable"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: partitionable-devices
+  labels:
+    sandbox.example.com/node-local-devices: ""
+data:
+  devices: |
+    - name: whole
+      attributes:
+        class:
+          string: partitionable
+      capacity:
+        widgets:
+          value: 4
+      consumesCounters:
+        - counterSet: widget-counter
+          counters:
+            widgets:
+              value: 4
+    - name: half-1
+      attributes:
+        class:
+          string: partitionable
+      capacity:
+        widgets:
+          value: 2
+      consumesCounters:
+        - counterSet: widget-counter
+          counters:
+            widgets:
+              value: 2
+    - name: half-2
+      attributes:
+        class:
+          string: partitionable
+      capacity:
+        widgets:
+          value: 2
+      consumesCounters:
+        - counterSet: widget-counter
+          counters:
+            widgets:
+              value: 2
+    - name: quart-1
+      attributes:
+        class:
+          string: partitionable
+      capacity:
+        widgets:
+          value: 1
+      consumesCounters:
+        - counterSet: widget-counter
+          counters:
+            widgets:
+              value: 1
+    - name: quart-2
+      attributes:
+        class:
+          string: partitionable
+      capacity:
+        widgets:
+          value: 1
+      consumesCounters:
+        - counterSet: widget-counter
+          counters:
+            widgets:
+              value: 1
+    - name: quart-3
+      attributes:
+        class:
+          string: partitionable
+      capacity:
+        widgets:
+          value: 1
+      consumesCounters:
+        - counterSet: widget-counter
+          counters:
+            widgets:
+              value: 1
+    - name: quart-4
+      attributes:
+        class:
+          string: partitionable
+      capacity:
+        widgets:
+          value: 1
+      consumesCounters:
+        - counterSet: widget-counter
+          counters:
+            widgets:
+              value: 1
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: partitionable-devices-counters
+  labels:
+    sandbox.example.com/node-local-devices: ""
+data:
+  sharedCounters: |
+    - name: widget-counter
+      counters:
+        widgets:
+          value: 4
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: whole-parts
+spec:
+  spec:
+    devices:
+      requests:
+      - name: two-quarters
+        exactly:
+          count: 2
+          deviceClassName: partitionable.sandbox.example.com
+          selectors:
+            - cel:
+                expression: device.capacity["sandbox.example.com"].widgets.compareTo(quantity("1")) == 0
+      - name: one-half
+        exactly:
+          deviceClassName: partitionable.sandbox.example.com
+          selectors:
+            - cel:
+                expression: device.capacity["sandbox.example.com"].widgets.compareTo(quantity("2")) == 0
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: partitionable
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: partitionable
+  template:
+    metadata:
+      labels:
+        app: partitionable
+    spec:
+      containers:
+      - name: ctr
+        image: registry.k8s.io/pause:3.10.1
+        resources:
+          claims:
+          - name: claim
+      resourceClaims:
+      - name: claim
+        resourceClaimTemplateName: whole-parts
