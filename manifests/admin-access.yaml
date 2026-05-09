@@ -1,0 +1,75 @@
+# This manifest only works in namespaces with the
+# resource.kubernetes.io/admin-access=true label:
+# kubectl label namespace default resource.kubernetes.io/admin-access=true
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: admin.sandbox.example.com
+spec:
+  selectors:
+  - cel:
+      expression: device.driver == "sandbox.example.com" &&
+        device.attributes["sandbox.example.com"].class == "admin"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: admin-devices
+  labels:
+    sandbox.example.com/node-local-devices: ""
+data:
+  devices: |
+    - name: admin0
+      attributes:
+        class:
+          string: admin
+    - name: admin1
+      attributes:
+        class:
+          string: admin
+    - name: admin2
+      attributes:
+        class:
+          string: admin
+    - name: admin3
+      attributes:
+        class:
+          string: admin
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: admin-access
+spec:
+  spec:
+    devices:
+      requests:
+      - name: admin
+        exactly:
+          deviceClassName: admin.sandbox.example.com
+          allocationMode: All
+          adminAccess: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: admin
+  template:
+    metadata:
+      labels:
+        app: admin
+    spec:
+      containers:
+      - name: ctr
+        image: registry.k8s.io/pause:3.10.1
+        resources:
+          claims:
+          - name: claim
+      resourceClaims:
+      - name: claim
+        resourceClaimTemplateName: admin-access

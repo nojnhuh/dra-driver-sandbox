@@ -30,8 +30,9 @@ func TestDriver(t *testing.T) {
 		c := createCluster(ctx, t, c, "default")
 
 		tests := []struct {
-			name     string
-			manifest string
+			name            string
+			manifest        string
+			namespaceLabels map[string]string
 		}{
 			{
 				name:     "test",
@@ -49,24 +50,32 @@ func TestDriver(t *testing.T) {
 				name:     "consumable-capacity",
 				manifest: "consumable-capacity.yaml",
 			},
+			{
+				name:     "admin-access",
+				manifest: "admin-access.yaml",
+				namespaceLabels: map[string]string{
+					"resource.kubernetes.io/admin-access": "true",
+				},
+			},
 		}
 
 		for _, test := range tests {
 			t.Run(test.name, func(t *testing.T) {
 				t.Parallel()
 				_, ctx := ktesting.NewTestContext(t)
-				testManifest(ctx, t, c, test.manifest)
+				testManifest(ctx, t, c, test.manifest, test.namespaceLabels)
 			})
 		}
 	})
 }
 
-func testManifest(ctx context.Context, t *testing.T, c clusterHandle, name string) {
+func testManifest(ctx context.Context, t *testing.T, c clusterHandle, name string, namespaceLabels map[string]string) {
 	logger := klog.FromContext(ctx)
 
 	namespace := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "e2e-",
+			Labels:       namespaceLabels,
 		},
 	}
 	err := c.client.Create(ctx, namespace)
