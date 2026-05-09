@@ -45,6 +45,10 @@ func TestDriver(t *testing.T) {
 				name:     "extended-resources",
 				manifest: "extended-resources.yaml",
 			},
+			{
+				name:     "consumable-capacity",
+				manifest: "consumable-capacity.yaml",
+			},
 		}
 
 		for _, test := range tests {
