@@ -1,4 +1,4 @@
-module github.com/nojnhuh/dra-driver-template/test
+module github.com/nojnhuh/dra-driver-sandbox/test
 
 go 1.26.2
 

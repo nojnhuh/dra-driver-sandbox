@@ -41,7 +41,7 @@ func startResourcesController(ctx context.Context, client kubernetes.Interface, 
 
 	informer := informersv1.NewConfigMapInformerWithOptions(client, "", internalinterfaces.InformerOptions{
 		TweakListOptions: func(opts *metav1.ListOptions) {
-			opts.LabelSelector = "template.example.com/node-local-devices"
+			opts.LabelSelector = "sandbox.example.com/node-local-devices"
 		},
 	})
 

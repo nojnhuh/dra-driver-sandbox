@@ -40,11 +40,11 @@ import (
 )
 
 var (
-	bootstrapClusterName  = "dra-driver-template"
+	bootstrapClusterName  = "dra-driver-sandbox"
 	skipCleanup           = false
 	driverManifestDirPath = filepath.Join("..", "..", "deploy")
 	testManifestDirPath   = filepath.Join("..", "..", "manifests")
-	driverImage           = "dra-driver-template:latest"
+	driverImage           = "dra-driver-sandbox:latest"
 )
 
 func init() {
@@ -57,7 +57,7 @@ func init() {
 
 var (
 	kindBootstrap     *kind.Provider
-	managedFieldOwner = "dra-driver-template-e2e"
+	managedFieldOwner = "dra-driver-sandbox-e2e"
 )
 
 type clusterHandle struct {
@@ -456,7 +456,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 			daemonSets,
 			ctrlclient.InNamespace(driverNamespace),
 			ctrlclient.HasLabels{
-				"app.kubernetes.io/name=dra-driver-template",
+				"app.kubernetes.io/name=dra-driver-sandbox",
 				"app.kubernetes.io/component=kubeletplugin",
 			},
 		)

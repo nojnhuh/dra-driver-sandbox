@@ -7,7 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/nojnhuh/dra-driver-template/internal/driver"
+	"github.com/nojnhuh/dra-driver-sandbox/internal/driver"
 	"github.com/spf13/cobra"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"

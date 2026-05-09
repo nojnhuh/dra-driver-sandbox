@@ -1,15 +1,15 @@
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: dra-driver-template-kubeletplugin
+  name: dra-driver-sandbox-kubeletplugin
   namespace: default
   labels:
-    app.kubernetes.io/name: dra-driver-template
+    app.kubernetes.io/name: dra-driver-sandbox
     app.kubernetes.io/component: kubeletplugin
 spec:
   selector:
     matchLabels:
-      app.kubernetes.io/name: dra-driver-template
+      app.kubernetes.io/name: dra-driver-sandbox
       app.kubernetes.io/component: kubeletplugin
   updateStrategy:
     type: RollingUpdate
@@ -19,13 +19,13 @@ spec:
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: dra-driver-template
+        app.kubernetes.io/name: dra-driver-sandbox
         app.kubernetes.io/component: kubeletplugin
     spec:
-      serviceAccountName: dra-driver-template-kubeletplugin
+      serviceAccountName: dra-driver-sandbox-kubeletplugin
       containers:
       - name: plugin
-        image: dra-driver-template
+        image: dra-driver-sandbox
         imagePullPolicy: Never
         args:
           - -v=5
