@@ -1,0 +1,42 @@
+name: Test
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+      - name: Run unit tests
+        run: go test ./...
+  e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Build driver image
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        id: docker-build
+        with:
+          tags: dra-driver-sandbox:latest
+          load: true
+      - name: Setup Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: test/go.mod
+      - name: Build kind node image
+        id: kind-node
+        run: |
+          version=v1.36.1
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          go -C test run sigs.k8s.io/kind build node-image --image "kindest/node:${version}" --type release "${version}"
+      - name: Run e2e tests
+        run: go -C test test -tags=e2e ./e2e --kubernetes-version ${{ steps.kind-node.outputs.version }}

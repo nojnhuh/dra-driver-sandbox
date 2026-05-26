@@ -45,6 +45,7 @@ var (
 	driverManifestDirPath = filepath.Join("..", "..", "deploy")
 	testManifestDirPath   = filepath.Join("..", "..", "manifests")
 	driverImage           = "dra-driver-sandbox:latest"
+	kubernetesVersion     = ""
 )
 
 func init() {
@@ -53,6 +54,7 @@ func init() {
 	flag.StringVar(&driverManifestDirPath, "driver-manifest-dir-path", driverManifestDirPath, "path to the directory containing YAML files defining the driver")
 	flag.StringVar(&testManifestDirPath, "test-manifest-dir-path", testManifestDirPath, "path to the directory containing YAML files defining test workloads")
 	flag.StringVar(&driverImage, "driver-image", driverImage, "Full name of the DRA driver's container image")
+	flag.StringVar(&kubernetesVersion, "kubernetes-version", kubernetesVersion, "Kubernetes version used for clusters hosting tests")
 }
 
 var (
@@ -231,7 +233,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 		ProviderRepositorySource: &capiclient.ProviderRepositorySourceOptions{
 			Flavor: "development",
 		},
-		KubernetesVersion:  "v1.36.0",
+		KubernetesVersion:  kubernetesVersion,
 		WorkerMachineCount: new(int64(1)),
 	})
 	if err != nil {
