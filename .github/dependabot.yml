@@ -1,0 +1,10 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directories:
+      - /
+      - /test
+    schedule:
+      interval: weekly
+      day: wednesday
+      time: "18:00"
