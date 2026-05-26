@@ -1,0 +1,17 @@
+version: "2"
+linters:
+  enable:
+    - contextcheck
+    - loggercheck
+    - modernize
+    - nolintlint
+    - unconvert
+    - usetesting
+    - whitespace
+formatters:
+  enable:
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/nojnhuh/dra-driver-sandbox/
