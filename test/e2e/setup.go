@@ -331,6 +331,9 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 		Kubeconfig:          capiclient.Kubeconfig{Path: h.kubeConfig},
 		WorkloadClusterName: name,
 	})
+	if err != nil {
+		t.Fatal("Error getting workload cluster kubeconfig:", err)
+	}
 	if _, err := io.Copy(kubeConfigFile, strings.NewReader(kubeConfigData)); err != nil {
 		t.Fatal("Error writing workload cluster kubeconfig:", err)
 	}
@@ -370,7 +373,10 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 	helmConfig := action.NewConfiguration(action.ConfigurationSetLogger(helmLogger(ctx, t)))
 	helmConfigFlags := genericclioptions.NewConfigFlags(false)
 	helmConfigFlags.KubeConfig = new(kubeConfigFile.Name())
-	helmConfig.Init(helmConfigFlags, tigeraOperator.Name, "")
+	err = helmConfig.Init(helmConfigFlags, tigeraOperator.Name, "")
+	if err != nil {
+		t.Fatal("Error initializing Helm config:", err)
+	}
 
 	calicoCharts := action.ChartPathOptions{
 		RepoURL: "https://docs.tigera.io/calico/charts",
@@ -424,6 +430,9 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 		return conditions.IsTrue(cluster, clusterv1.ClusterControlPlaneMachinesReadyCondition) &&
 			conditions.IsTrue(cluster, clusterv1.ClusterWorkerMachinesReadyCondition), nil
 	})
+	if err != nil {
+		t.Fatal("Machines never became Ready:", err)
+	}
 
 	// TODO: here Calico has initialized enough for the Nodes to become Ready,
 	// but some of its Pods still are not Ready. Do we need to wait for those?
@@ -472,6 +481,9 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 		}
 		return true, nil
 	})
+	if err != nil {
+		t.Fatal("DaemonSet Pods never became Ready:", err)
+	}
 
 	return clusterHandle{
 		kubeConfig: kubeConfigFile.Name(),

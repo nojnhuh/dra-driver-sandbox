@@ -45,7 +45,7 @@ func kustomizeFile(path string, k *types.Kustomization) ([]unstructured.Unstruct
 	return runKustomize(kustomizeFiles, k)
 }
 
-func kustomizeDirectory(dirPath string, k *types.Kustomization) ([]unstructured.Unstructured, error) {
+func kustomizeDirectory(dirPath string, k *types.Kustomization) (us []unstructured.Unstructured, retErr error) {
 	// Copy the files on disk into an in-memory filesystem to avoid writing a
 	// kustomization to disk.
 	kustomizeFiles := filesys.MakeFsInMemory()
@@ -56,7 +56,11 @@ func kustomizeDirectory(dirPath string, k *types.Kustomization) ([]unstructured.
 		if err != nil {
 			return err
 		}
-		defer manifestFile.Close()
+		defer func() {
+			if err := manifestFile.Close(); err != nil && retErr == nil {
+				retErr = err
+			}
+		}()
 
 		manifestData, err := io.ReadAll(manifestFile)
 		if err != nil {
