@@ -14,13 +14,13 @@ experimentation with DRA.
 1. Build the driver:
 
     ```
-    docker build -t dra-driver-sandbox:latest --build-arg cmd=dra-driver-sandbox .
+    docker build -t dra-driver-sandbox-kubeletplugin:latest --build-arg cmd=dra-driver-sandbox-kubeletplugin .
     ```
 
     Then push the image or load it onto a kind cluster:
 
     ```
-    kind load docker-image dra-driver-sandbox:latest
+    kind load docker-image dra-driver-sandbox-kubeletplugin:latest
     ```
 
 1. Deploy the driver:
