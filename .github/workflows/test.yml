@@ -35,7 +35,7 @@ jobs:
           go-version-file: go.work
           cache-dependency-path: "**/go.mod"
       - parallel:
-        - name: Build driver image
+        - name: Build kubelet plugin image
           uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
           id: docker-build
           with:
@@ -43,8 +43,13 @@ jobs:
               cmd=dra-driver-sandbox-kubeletplugin
             tags: dra-driver-sandbox-kubeletplugin:latest
             load: true
-            cache-from: type=gha
-            cache-to: type=gha,mode=max
+        - name: Build controller image
+          uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+          with:
+            build-args: |
+              cmd=dra-driver-sandbox-controller
+            tags: dra-driver-sandbox-controller:latest
+            load: true
         - name: Build kind node image
           id: kind-node
           run: |
