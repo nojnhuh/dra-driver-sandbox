@@ -14,7 +14,7 @@ experimentation with DRA.
 1. Build the driver:
 
     ```
-    docker build -t dra-driver-sandbox:latest .
+    docker build -t dra-driver-sandbox:latest --build-arg cmd=dra-driver-sandbox .
     ```
 
     Then push the image or load it onto a kind cluster:
