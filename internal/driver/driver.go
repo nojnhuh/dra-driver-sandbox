@@ -10,6 +10,7 @@ import (
 
 	"github.com/spf13/pflag"
 	resourcev1 "k8s.io/api/resource/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	"k8s.io/client-go/kubernetes"
@@ -41,6 +42,10 @@ type driver struct {
 	client    kubernetes.Interface
 	nodeName  string
 	namespace string
+
+	checkpointPath    string
+	checkpointDecoder runtime.Decoder
+	checkpointEncoder runtime.Encoder
 }
 
 // fatalError represents an error that causes the driver to exit
@@ -55,20 +60,27 @@ type fatalError struct {
 // error.
 func Run(ctx context.Context, clientset kubernetes.Interface, opts Options) error {
 	logger := klog.FromContext(ctx)
-	ctx, cancel := context.WithCancelCause(ctx)
 
-	d := &driver{
-		cancel:    cancel,
-		client:    clientset,
-		nodeName:  opts.NodeName,
-		namespace: opts.Namespace,
+	checkpointDecoder, checkpointEncoder, err := checkpointSerializer()
+	if err != nil {
+		return fmt.Errorf("initialize checkpoint scheme: %w", err)
 	}
 
-	err := os.MkdirAll(filepath.Join(opts.KubeletPluginDataDirectoryPath, driverName), 0750)
+	d := &driver{
+		client:            clientset,
+		nodeName:          opts.NodeName,
+		namespace:         opts.Namespace,
+		checkpointPath:    filepath.Join(opts.KubeletPluginDataDirectoryPath, driverName, "checkpoint.json"),
+		checkpointDecoder: checkpointDecoder,
+		checkpointEncoder: checkpointEncoder,
+	}
+
+	err = os.MkdirAll(filepath.Join(opts.KubeletPluginDataDirectoryPath, driverName), 0750)
 	if err != nil {
 		return fmt.Errorf("create kubelet plugin data directory path: %w", err)
 	}
 
+	ctx, d.cancel = context.WithCancelCause(ctx)
 	d.helper, err = kubeletplugin.Start(ctx, d,
 		kubeletplugin.KubeClient(clientset),
 		kubeletplugin.DriverName(driverName),
@@ -104,24 +116,26 @@ func Run(ctx context.Context, clientset kubernetes.Interface, opts Options) erro
 
 // PrepareResourceClaims implements [kubeletplugin.DRAPlugin].
 func (d *driver) PrepareResourceClaims(ctx context.Context, claims []*resourcev1.ResourceClaim) (result map[types.UID]kubeletplugin.PrepareResult, err error) {
-	logger := klog.FromContext(ctx)
-
 	result = make(map[types.UID]kubeletplugin.PrepareResult)
 	for _, claim := range claims {
-		logger.V(4).Info("Preparing claim", "claim", klog.KObj(claim), "uid", claim.UID)
-		result[claim.UID] = kubeletplugin.PrepareResult{}
+		r, err := d.prepareClaim(ctx, claim)
+		if err != nil {
+			return nil, fmt.Errorf("prepare ResourceClaim %s/%s, UID=%s: %w", claim.Namespace, claim.Name, claim.UID, err)
+		}
+		result[claim.UID] = r
 	}
 	return
 }
 
 // UnprepareResourceClaims implements [kubeletplugin.DRAPlugin].
 func (d *driver) UnprepareResourceClaims(ctx context.Context, claims []kubeletplugin.NamespacedObject) (result map[types.UID]error, err error) {
-	logger := klog.FromContext(ctx)
-
 	result = make(map[types.UID]error)
 	for _, claim := range claims {
-		logger.V(4).Info("Unpreparing claim", "claim", klog.KRef(claim.Namespace, claim.Name), "uid", claim.UID)
-		result[claim.UID] = nil
+		claimErr, err := d.unprepareClaim(ctx, claim)
+		if err != nil {
+			return nil, fmt.Errorf("unprepare ResourceClaim %s/%s, UID=%s: %w", claim.Namespace, claim.Name, claim.UID, err)
+		}
+		result[claim.UID] = claimErr
 	}
 	return
 }
@@ -132,4 +146,53 @@ func (d *driver) HandleError(ctx context.Context, err error, msg string) {
 	if !errors.Is(err, kubeletplugin.ErrRecoverable) {
 		d.cancel(fatalError{err})
 	}
+}
+
+// prepareClaim prepares a single ResourceClaim.
+func (d *driver) prepareClaim(ctx context.Context, claim *resourcev1.ResourceClaim) (kubeletplugin.PrepareResult, error) {
+	logger := klog.FromContext(ctx)
+	logger.V(4).Info("Preparing claim", "claim", klog.KObj(claim), "uid", claim.UID)
+
+	checkpoint, err := readCheckpoint(d.checkpointPath, d.checkpointDecoder)
+	if err != nil {
+		return kubeletplugin.PrepareResult{}, fmt.Errorf("read checkpoint: %w", err)
+	}
+
+	// TODO: avoid repeating any non-idempotent steps if this isn't the first
+	// time this claim is being prepared. If work needs to be done, do it here
+	// and then update the checkpoint with enough data to enable
+	// [driver.unprepareClaim] to fully reset.
+
+	if err := writeCheckpoint(d.checkpointPath, d.checkpointEncoder, checkpoint); err != nil {
+		// A failure to write the checkpoint doesn't affect only this claim.
+		// None of the claims being prepared now should be considered valid.
+		return kubeletplugin.PrepareResult{}, fmt.Errorf("write checkpoint: %w", err)
+	}
+
+	return kubeletplugin.PrepareResult{}, nil
+}
+
+// unprepareClaim unprepares a single ResourceClaim. It returns two errors. The
+// first indicates a failure unpreparing this individual claim. The second
+// indicates a failure that potentially affects other claims.
+func (d *driver) unprepareClaim(ctx context.Context, claim kubeletplugin.NamespacedObject) (error, error) {
+	logger := klog.FromContext(ctx)
+	logger.V(4).Info("Unpreparing claim", "claim", klog.KRef(claim.Namespace, claim.Name), "uid", claim.UID)
+
+	checkpoint, err := readCheckpoint(d.checkpointPath, d.checkpointDecoder)
+	if err != nil {
+		return nil, fmt.Errorf("read checkpoint: %w", err)
+	}
+
+	// TODO: Undo any non-idempotent steps performed by the corresponding
+	// [driver.prepareClaim]. Then, remove this claim from the checkpoint.
+
+	if err := writeCheckpoint(d.checkpointPath, d.checkpointEncoder, checkpoint); err != nil {
+		// A failure to write the checkpoint doesn't affect only this claim.
+		// None of the claims being unprepared now should be considered fully
+		// unprepared.
+		return nil, fmt.Errorf("write checkpoint: %w", err)
+	}
+
+	return nil, nil
 }
