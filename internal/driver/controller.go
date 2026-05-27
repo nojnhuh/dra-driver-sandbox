@@ -36,12 +36,12 @@ type resourcesController struct {
 	nodeName        string
 }
 
-func startResourcesController(ctx context.Context, client kubernetes.Interface, helper *kubeletplugin.Helper, nodeName string) (*resourcesController, error) {
+func startResourcesController(ctx context.Context, client kubernetes.Interface, helper *kubeletplugin.Helper, driverName, nodeName string) (*resourcesController, error) {
 	logger := klog.FromContext(ctx)
 
 	informer := informersv1.NewConfigMapInformerWithOptions(client, "", internalinterfaces.InformerOptions{
 		TweakListOptions: func(opts *metav1.ListOptions) {
-			opts.LabelSelector = "sandbox.example.com/node-local-devices"
+			opts.LabelSelector = driverName + "/node-local-devices"
 		},
 	})
 

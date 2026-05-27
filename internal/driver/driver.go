@@ -82,7 +82,7 @@ func Run(ctx context.Context, clientset kubernetes.Interface, opts Options) erro
 	}
 	defer d.helper.Stop()
 
-	controller, err := startResourcesController(ctx, clientset, d.helper, d.nodeName)
+	controller, err := startResourcesController(ctx, clientset, d.helper, driverName, d.nodeName)
 	if err != nil {
 		return fmt.Errorf("start driver resources controller: %w", err)
 	}
