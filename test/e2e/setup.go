@@ -58,6 +58,10 @@ var (
 		Name:    "dra-driver-sandbox-kubeletplugin",
 		NewName: "dra-driver-sandbox-kubeletplugin", // don't change by default
 	}
+	controllerImage = parsedImageRef{
+		Name:    "dra-driver-sandbox-controller",
+		NewName: "dra-driver-sandbox-controller", // don't change by default
+	}
 )
 
 func init() {
@@ -66,6 +70,7 @@ func init() {
 	flag.StringVar(&driverManifestDirPath, "driver-manifest-dir-path", driverManifestDirPath, "path to the directory containing YAML files defining the driver")
 	flag.StringVar(&testManifestDirPath, "test-manifest-dir-path", testManifestDirPath, "path to the directory containing YAML files defining test workloads")
 	flag.Var(&kubeletPluginImage, "kubelet-plugin-image", "Full name of the DRA driver's kubelet plugin container image")
+	flag.Var(&controllerImage, "controller-image", "Full name of the DRA driver's controller container image")
 	flag.StringVar(&kubernetesVersion, "kubernetes-version", kubernetesVersion, "Kubernetes version used for clusters hosting tests")
 }
 
@@ -536,7 +541,10 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	driverNamespace := "default"
 	driverKustomization := &types.Kustomization{
 		Namespace: driverNamespace,
-		Images:    []types.Image{types.Image(kubeletPluginImage)},
+		Images: []types.Image{
+			types.Image(kubeletPluginImage),
+			types.Image(controllerImage),
+		},
 	}
 	kustomizedDriver, err := kustomizeDirectory(driverManifestDirPath, driverKustomization)
 	if err != nil {
@@ -556,17 +564,16 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 			t.Fatalf("Error applying %s %s/%s: %v", obj.GetKind(), obj.GetNamespace(), obj.GetName(), err)
 		}
 	}
-	kubeletPluginLabels := []string{
-		"app.kubernetes.io/name=dra-driver-sandbox",
-		"app.kubernetes.io/component=kubeletplugin",
-	}
 	err = wait.PollUntilContextTimeout(ctx, 1*time.Second, 60*time.Second, true /*immediate*/, func(ctx context.Context) (bool, error) {
 		daemonSets := new(appsv1.DaemonSetList)
 		err := client.List(
 			ctx,
 			daemonSets,
 			ctrlclient.InNamespace(driverNamespace),
-			ctrlclient.HasLabels(kubeletPluginLabels),
+			ctrlclient.HasLabels{
+				"app.kubernetes.io/name=dra-driver-sandbox",
+				"app.kubernetes.io/component=kubeletplugin",
+			},
 		)
 		if err != nil {
 			return false, err
@@ -583,7 +590,33 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	if err != nil {
 		t.Fatal("DaemonSet Pods never became Ready:", err)
 	}
-	collectPods(ctx, t, k8sClient, driverNamespace, metav1.ListOptions{LabelSelector: strings.Join(kubeletPluginLabels, ",")})
+	err = wait.PollUntilContextTimeout(ctx, 1*time.Second, 1*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
+		deployments := new(appsv1.DeploymentList)
+		err := client.List(
+			ctx,
+			deployments,
+			ctrlclient.InNamespace(driverNamespace),
+			ctrlclient.HasLabels{
+				"app.kubernetes.io/name=dra-driver-sandbox",
+				"app.kubernetes.io/component=controller",
+			},
+		)
+		if err != nil {
+			return false, err
+		}
+		for _, deployment := range deployments.Items {
+			if deployment.Status.ObservedGeneration != deployment.Generation ||
+				deployment.Status.Replicas != *deployment.Spec.Replicas ||
+				deployment.Status.Replicas != deployment.Status.AvailableReplicas {
+				return false, nil
+			}
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("Deployments never became fully available: %v", err)
+	}
+	collectPods(ctx, t, k8sClient, driverNamespace, metav1.ListOptions{LabelSelector: "app.kubernetes.io/name=dra-driver-sandbox"})
 
 	return clusterHandle{
 		kubeConfig: kubeConfigFile.Name(),
@@ -652,7 +685,8 @@ func buildDefaultCluster(opts defaultClusterOpts) *clusterv1.Cluster {
 						Name: "preLoadImages",
 						Value: apiextensionsv1.JSON{
 							Raw: []byte(`[
-								"` + kubeletPluginImage.String() + `"
+								"` + kubeletPluginImage.String() + `",
+								"` + controllerImage.String() + `"
 							]`),
 						},
 					},
