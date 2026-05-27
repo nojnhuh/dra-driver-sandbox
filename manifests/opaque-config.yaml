@@ -1,0 +1,118 @@
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: configured.sandbox.example.com
+spec:
+  selectors:
+  - cel:
+      expression: device.driver == "sandbox.example.com" &&
+        device.attributes["sandbox.example.com"].class == "configured"
+  # config:
+  # - opaque:
+  #     driver: sandbox.example.com
+  #     parameters:
+  #       cdiVersion: 1.1.0
+  #       kind: sandbox.example.com/configured
+  #       containerEdits:
+  #         env:
+  #           - DEVICE_CLASS=configured
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: configurable-devices
+  labels:
+    sandbox.example.com/node-local-devices: ""
+data:
+  devices: |
+    - name: dev0
+      attributes:
+        class:
+          string: configured
+    - name: dev1
+      attributes:
+        class:
+          string: configured
+  cdi: |
+    cdiVersion: 1.1.0
+    kind: sandbox.example.com/configured
+    containerEdits:
+      env:
+        - DEVICE_CLASS=configured
+    devices:
+      - name: dev0
+        containerEdits:
+          env:
+            - DEVICE_NAME=dev0
+      - name: dev1
+        containerEdits:
+          env:
+            - DEVICE_NAME=dev1
+---
+# apiVersion: resource.k8s.io/v1
+# kind: ResourceClaim
+# metadata:
+#   name: configured-devices
+# spec:
+#   devices:
+#     requests:
+#     - name: a-dev
+#       exactly:
+#         deviceClassName: configured.sandbox.example.com
+#     - name: another-dev
+#       exactly:
+#         deviceClassName: configured.sandbox.example.com
+    # config:
+    #   - opaque:
+    #       driver: sandbox.example.com
+    #       parameters:
+    #         containerEdits:
+    #           env:
+    #             - CLAIM_NAME=one-device
+    #   - opaque:
+    #       driver: sandbox.example.com
+    #       parameters:
+    #         containerEdits:
+    #           env:
+    #             - REQUEST_NAME=a-dev
+    #     requests:
+    #       - a-dev
+    #   - opaque:
+    #       driver: sandbox.example.com
+    #       parameters:
+    #         containerEdits:
+    #           env:
+    #             - REQUEST_NAME=another-dev
+    #     requests:
+    #       - another-dev
+# ---
+# apiVersion: batch/v1
+# kind: Job
+# metadata:
+#   name: configured
+# spec:
+#   template:
+#     metadata:
+#       labels:
+#         app: configured
+#     spec:
+#       containers:
+#       - name: ctr0
+#         image: busybox
+#         command: ["env"]
+#         resources:
+#           claims:
+#           - name: claim
+#             request: a-dev
+#       - name: ctr1
+#         image: registry.k8s.io/pause:3.10
+#         image: busybox
+#         command: ["env"]
+#         resources:
+#           claims:
+#           - name: claim
+#             request: another-dev
+#       resourceClaims:
+#       - name: claim
+#         resourceClaimName: configured-devices
+#       restartPolicy: Never

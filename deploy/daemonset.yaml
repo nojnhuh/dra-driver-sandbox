@@ -47,6 +47,8 @@ spec:
           mountPath: /var/lib/kubelet/plugins_registry
         - name: plugins
           mountPath: /var/lib/kubelet/plugins
+        - name: cdi
+          mountPath: /var/run/cdi
       volumes:
       - name: plugins-registry
         hostPath:
@@ -54,3 +56,6 @@ spec:
       - name: plugins
         hostPath:
           path: /var/lib/kubelet/plugins
+      - name: cdi
+        hostPath:
+          path: /var/run/cdi

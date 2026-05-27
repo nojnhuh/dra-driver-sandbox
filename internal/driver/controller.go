@@ -21,6 +21,7 @@ import (
 	"k8s.io/dynamic-resource-allocation/resourceslice"
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/yaml"
+	"tags.cncf.io/container-device-interface/pkg/cdi"
 )
 
 const (
@@ -137,6 +138,18 @@ func (c *resourcesController) syncResources(ctx context.Context) error {
 			Devices:        devices,
 			SharedCounters: sharedCounters,
 		})
+
+		cdiSpec, err := cdi.ParseSpec([]byte(configMap.Data["cdi"]))
+		if err != nil {
+			return err
+		}
+		specName, err := cdi.GenerateNameForTransientSpec(cdiSpec, configMap.Namespace+"-"+configMap.Name)
+		if err != nil {
+			return err
+		}
+		if err := cdi.GetDefaultCache().WriteSpec(cdiSpec, specName); err != nil {
+			return err
+		}
 	}
 
 	resources := resourceslice.DriverResources{
