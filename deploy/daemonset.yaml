@@ -25,7 +25,7 @@ spec:
       serviceAccountName: dra-driver-sandbox-kubeletplugin
       containers:
       - name: plugin
-        image: dra-driver-sandbox
+        image: dra-driver-sandbox-kubeletplugin
         imagePullPolicy: Never
         args:
           - -v=5

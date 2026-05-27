@@ -54,9 +54,9 @@ var (
 	clusterDirPath        = filepath.Join("..", "..", "clusters")
 	kubernetesVersion     = ""
 
-	driverImage = parsedImageRef{
-		Name:    "dra-driver-sandbox",
-		NewName: "dra-driver-sandbox", // don't change by default
+	kubeletPluginImage = parsedImageRef{
+		Name:    "dra-driver-sandbox-kubeletplugin",
+		NewName: "dra-driver-sandbox-kubeletplugin", // don't change by default
 	}
 )
 
@@ -65,7 +65,7 @@ func init() {
 	flag.BoolVar(&skipCleanup, "skip-cleanup", skipCleanup, "Do not delete anything that was created during the test")
 	flag.StringVar(&driverManifestDirPath, "driver-manifest-dir-path", driverManifestDirPath, "path to the directory containing YAML files defining the driver")
 	flag.StringVar(&testManifestDirPath, "test-manifest-dir-path", testManifestDirPath, "path to the directory containing YAML files defining test workloads")
-	flag.Var(&driverImage, "driver-image", "Full name of the DRA driver's container image")
+	flag.Var(&kubeletPluginImage, "kubelet-plugin-image", "Full name of the DRA driver's kubelet plugin container image")
 	flag.StringVar(&kubernetesVersion, "kubernetes-version", kubernetesVersion, "Kubernetes version used for clusters hosting tests")
 }
 
@@ -536,7 +536,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	driverNamespace := "default"
 	driverKustomization := &types.Kustomization{
 		Namespace: driverNamespace,
-		Images:    []types.Image{types.Image(driverImage)},
+		Images:    []types.Image{types.Image(kubeletPluginImage)},
 	}
 	kustomizedDriver, err := kustomizeDirectory(driverManifestDirPath, driverKustomization)
 	if err != nil {
@@ -652,7 +652,7 @@ func buildDefaultCluster(opts defaultClusterOpts) *clusterv1.Cluster {
 						Name: "preLoadImages",
 						Value: apiextensionsv1.JSON{
 							Raw: []byte(`[
-								"` + driverImage.String() + `"
+								"` + kubeletPluginImage.String() + `"
 							]`),
 						},
 					},

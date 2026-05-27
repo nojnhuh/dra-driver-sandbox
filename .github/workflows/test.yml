@@ -40,8 +40,8 @@ jobs:
           id: docker-build
           with:
             build-args: |
-              cmd=dra-driver-sandbox
-            tags: dra-driver-sandbox:latest
+              cmd=dra-driver-sandbox-kubeletplugin
+            tags: dra-driver-sandbox-kubeletplugin:latest
             load: true
             cache-from: type=gha
             cache-to: type=gha,mode=max
