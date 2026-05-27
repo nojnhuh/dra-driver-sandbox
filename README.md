@@ -7,25 +7,26 @@ experimentation with DRA.
 
 1. Create a cluster, e.g. with kind:
 
-```
-kind create cluster
-```
+    ```
+    kind create cluster
+    ```
 
 1. Build the driver:
 
-```
-docker build -t dra-driver-sandbox:latest .
-```
+    ```
+    docker build -t dra-driver-sandbox:latest .
+    ```
 
-Then push the image or load it onto a kind cluster:
-```
-kind load docker-image dra-driver-sandbox:latest
-```
+    Then push the image or load it onto a kind cluster:
+
+    ```
+    kind load docker-image dra-driver-sandbox:latest
+    ```
 
 1. Deploy the driver:
 
-```
-kubectl apply -f deploy
-```
+    ```
+    kubectl apply -f deploy
+    ```
 
 Once the driver is deployed, the example [manifests](manifests) can be deployed.
