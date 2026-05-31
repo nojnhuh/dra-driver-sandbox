@@ -28,7 +28,8 @@ spec:
         image: dra-driver-sandbox-kubeletplugin
         imagePullPolicy: Never
         args:
-          - -v=5
+          - --v=2
+          - --vmodule=driver=5,controller=5,main=5
         env:
         - name: NODE_NAME
           valueFrom:

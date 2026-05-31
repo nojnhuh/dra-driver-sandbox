@@ -24,4 +24,10 @@ spec:
         image: dra-driver-sandbox-controller
         imagePullPolicy: Never
         args:
-          - -v=5
+          - --v=2
+          - --vmodule=controller=5,main=5
+        env:
+        - name: K8S_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
