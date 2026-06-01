@@ -17,7 +17,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
-const driverName = "sandbox.example.com"
+const DriverName = "sandbox.example.com"
 
 type Options struct {
 	KubeletPluginDataDirectoryPath string
@@ -64,14 +64,14 @@ func Run(ctx context.Context, clientset kubernetes.Interface, opts Options) erro
 		namespace: opts.Namespace,
 	}
 
-	err := os.MkdirAll(filepath.Join(opts.KubeletPluginDataDirectoryPath, driverName), 0750)
+	err := os.MkdirAll(filepath.Join(opts.KubeletPluginDataDirectoryPath, DriverName), 0750)
 	if err != nil {
 		return fmt.Errorf("create kubelet plugin data directory path: %w", err)
 	}
 
 	d.helper, err = kubeletplugin.Start(ctx, d,
 		kubeletplugin.KubeClient(clientset),
-		kubeletplugin.DriverName(driverName),
+		kubeletplugin.DriverName(DriverName),
 		kubeletplugin.PluginDataDirectoryPath(opts.KubeletPluginDataDirectoryPath),
 		kubeletplugin.RegistrarDirectoryPath(opts.KubeletRegistrarDirectoryPath),
 		kubeletplugin.NodeName(opts.NodeName),
@@ -82,7 +82,7 @@ func Run(ctx context.Context, clientset kubernetes.Interface, opts Options) erro
 	}
 	defer d.helper.Stop()
 
-	controller, err := startResourcesController(ctx, clientset, d.helper, driverName, d.nodeName)
+	controller, err := startResourcesController(ctx, clientset, d.helper, d.nodeName)
 	if err != nil {
 		return fmt.Errorf("start driver resources controller: %w", err)
 	}

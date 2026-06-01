@@ -24,8 +24,8 @@ import (
 )
 
 const (
-	templateDevicesKey        = "devices"
-	templateSharedCountersKey = "sharedCounters"
+	TemplateDevicesKey        = "devices"
+	TemplateSharedCountersKey = "sharedCounters"
 )
 
 type resourcesController struct {
@@ -36,12 +36,12 @@ type resourcesController struct {
 	nodeName        string
 }
 
-func startResourcesController(ctx context.Context, client kubernetes.Interface, helper *kubeletplugin.Helper, driverName, nodeName string) (*resourcesController, error) {
+func startResourcesController(ctx context.Context, client kubernetes.Interface, helper *kubeletplugin.Helper, nodeName string) (*resourcesController, error) {
 	logger := klog.FromContext(ctx)
 
 	informer := informersv1.NewConfigMapInformerWithOptions(client, "", internalinterfaces.InformerOptions{
 		TweakListOptions: func(opts *metav1.ListOptions) {
-			opts.LabelSelector = driverName + "/node-local-devices"
+			opts.LabelSelector = DriverName + "/node-local-devices"
 		},
 	})
 
@@ -124,12 +124,12 @@ func (c *resourcesController) syncResources(ctx context.Context) error {
 	var resourceSlices []resourceslice.Slice
 	for _, configMap := range configMaps {
 		var devices []resourcev1.Device
-		if err := unmarshalConfigMapKey(configMap, templateDevicesKey, &devices); err != nil {
+		if err := UnmarshalConfigMapKey(configMap, TemplateDevicesKey, &devices); err != nil {
 			return err
 		}
 
 		var sharedCounters []resourcev1.CounterSet
-		if err := unmarshalConfigMapKey(configMap, templateSharedCountersKey, &sharedCounters); err != nil {
+		if err := UnmarshalConfigMapKey(configMap, TemplateSharedCountersKey, &sharedCounters); err != nil {
 			return err
 		}
 
@@ -150,7 +150,7 @@ func (c *resourcesController) syncResources(ctx context.Context) error {
 	return c.helper.PublishResources(ctx, resources)
 }
 
-func unmarshalConfigMapKey(configMap *corev1.ConfigMap, key string, to any) error {
+func UnmarshalConfigMapKey(configMap *corev1.ConfigMap, key string, to any) error {
 	data, ok := configMap.Data[key]
 	if !ok {
 		return nil
