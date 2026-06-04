@@ -37,6 +37,8 @@ jobs:
         run: |
           version=v1.36.1
           echo "version=${version}" >> "$GITHUB_OUTPUT"
-          go -C test run sigs.k8s.io/kind build node-image --image "kindest/node:${version}" --type release "${version}"
+          if ! docker manifest inspect "kindest/node:${version}"; then
+            go -C test run sigs.k8s.io/kind build node-image --image "kindest/node:${version}" --type release "${version}"
+          fi
       - name: Run e2e tests
         run: go -C test test -tags=e2e ./e2e --kubernetes-version ${{ steps.kind-node.outputs.version }}
