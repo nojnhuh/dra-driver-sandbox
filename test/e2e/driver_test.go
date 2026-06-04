@@ -99,7 +99,7 @@ func testManifest(ctx context.Context, t *testing.T, c clusterHandle, name strin
 			return true, nil
 		})
 		if err != nil {
-			logger.Error(err, "error waiting for namespace to be gone", "namespace", klog.KObj(namespace))
+			logger.Error(err, "error waiting for namespace to be gone", "namespace", klog.Format(namespace))
 			return
 		}
 	})

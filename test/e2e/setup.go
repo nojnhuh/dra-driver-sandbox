@@ -37,6 +37,7 @@ import (
 	kindv1 "sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 	kind "sigs.k8s.io/kind/pkg/cluster"
 	"sigs.k8s.io/kustomize/api/types"
+	"sigs.k8s.io/yaml"
 )
 
 var (
@@ -287,18 +288,35 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 		t.Fatal("Error applying cluster template:", err)
 	}
 	t.Cleanup(func() {
-		if skipCleanup {
-			return
-		}
 		cluster := &clusterv1.Cluster{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      name,
 				Namespace: clusterNamespace,
 			},
 		}
-		err := h.client.Delete(ctx, cluster)
+		logger := logger.WithValues("cluster", klog.KObj(cluster))
+		func() {
+			cluster, err := util.GetClusterByName(ctx, h.client, clusterNamespace, name)
+			if err != nil {
+				logger.Error(err, "Error getting cluster, not dumping")
+				return
+			}
+			clusterYAML, err := yaml.Marshal(cluster)
+			if err != nil {
+				logger.Error(err, "Error marshaling cluster to YAML, not dumping")
+				return
+			}
+			if err := os.WriteFile(filepath.Join(t.ArtifactDir(), "cluster.yaml"), clusterYAML, 0644); err != nil {
+				logger.Error(err, "Error writing cluster YAML")
+				return
+			}
+		}()
+		if skipCleanup {
+			return
+		}
+		err = h.client.Delete(ctx, cluster)
 		if err != nil {
-			logger.Error(err, "error deleting cluster", "cluster", klog.KObj(cluster))
+			logger.Error(err, "error deleting cluster")
 			return
 		}
 		err = wait.PollUntilContextTimeout(ctx, 5*time.Second, 5*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
@@ -427,7 +445,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 	err = wait.PollUntilContextTimeout(ctx, 1*time.Second, 2*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
 		cluster, err := util.GetClusterByName(ctx, h.client, clusterNamespace, name)
 		if err != nil {
-			t.Fatalf("Error getting Cluster %s: %v", name, err)
+			return false, fmt.Errorf("get Cluster %s: %w", name, err)
 		}
 		return conditions.IsTrue(cluster, clusterv1.ClusterControlPlaneMachinesReadyCondition) &&
 			conditions.IsTrue(cluster, clusterv1.ClusterWorkerMachinesReadyCondition), nil
