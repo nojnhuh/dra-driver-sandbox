@@ -88,7 +88,7 @@ func testManifest(ctx context.Context, t *testing.T, c clusterHandle, name strin
 		}
 		err = c.client.Delete(ctx, namespace)
 		if err != nil {
-			logger.Error(err, "Error deleting namespace", "namespace", namespace.Name)
+			t.Errorf("Error deleting namespace %s: %v", namespace.Name, err)
 			return
 		}
 		err = wait.PollUntilContextTimeout(ctx, 1*time.Second, 30*time.Second, true /*immediate*/, func(ctx context.Context) (bool, error) {
@@ -99,7 +99,8 @@ func testManifest(ctx context.Context, t *testing.T, c clusterHandle, name strin
 			return true, nil
 		})
 		if err != nil {
-			logger.Error(err, "error waiting for namespace to be gone", "namespace", klog.Format(namespace))
+			t.Errorf("Error waiting for namespace %s to be gone: %v", namespace.Name, err)
+			logger.Info("Namespace dump", "namespace", klog.Format(namespace))
 			return
 		}
 	})
@@ -125,7 +126,7 @@ func testManifest(ctx context.Context, t *testing.T, c clusterHandle, name strin
 		for _, obj := range kustomized {
 			err = c.client.Delete(ctx, &obj)
 			if err != nil {
-				logger.Error(err, "Error deleting test object", "apiVersion", obj.GetAPIVersion(), "kind", obj.GetKind(), "namespace", obj.GetNamespace(), "name", obj.GetName())
+				t.Errorf("Error deleting test object %s %s %s/%s: %v", obj.GetAPIVersion(), obj.GetKind(), obj.GetNamespace(), obj.GetName(), err)
 				return
 			}
 			err = wait.PollUntilContextTimeout(ctx, 1*time.Second, 30*time.Second, true /*immediate*/, func(ctx context.Context) (bool, error) {
@@ -136,7 +137,8 @@ func testManifest(ctx context.Context, t *testing.T, c clusterHandle, name strin
 				return true, nil
 			})
 			if err != nil {
-				logger.Error(err, "error waiting for test object to be gone", "apiVersion", obj.GetAPIVersion(), "kind", obj.GetKind(), "namespace", obj.GetNamespace(), "name", obj.GetName())
+				t.Errorf("Error waiting for test object %s %s %s/%s to be gone: %v", obj.GetAPIVersion(), obj.GetKind(), obj.GetNamespace(), obj.GetName(), err)
+				logger.Info("Object dump", "object", klog.Format(obj))
 				return
 			}
 		}

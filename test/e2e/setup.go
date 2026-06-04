@@ -99,7 +99,7 @@ func createManagementCluster(ctx context.Context, t *testing.T) clusterHandle {
 		logger.V(4).Info("deleting management cluster")
 		err := kindBootstrap.Delete(bootstrapClusterName, "")
 		if err != nil {
-			logger.Error(err, "error deleting bootstrap cluster", "name", bootstrapClusterName)
+			t.Errorf("Error deleting bootstrap cluster %s: %v", bootstrapClusterName, err)
 			return
 		}
 	})
@@ -107,7 +107,7 @@ func createManagementCluster(ctx context.Context, t *testing.T) clusterHandle {
 		logger.V(4).Info("collecting kind logs", "name", bootstrapClusterName, "dir", t.ArtifactDir())
 		err := kindBootstrap.CollectLogs(bootstrapClusterName, t.ArtifactDir())
 		if err != nil {
-			logger.Error(err, "error collecting kind logs", "name", bootstrapClusterName)
+			t.Errorf("Error collecting kind logs for cluster %s: %v", bootstrapClusterName, err)
 			return
 		}
 	})
@@ -298,16 +298,16 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 		func() {
 			cluster, err := util.GetClusterByName(ctx, h.client, clusterNamespace, name)
 			if err != nil {
-				logger.Error(err, "Error getting cluster, not dumping")
+				t.Errorf("Error getting Cluster %s/%s: %v", clusterNamespace, name, err)
 				return
 			}
 			clusterYAML, err := yaml.Marshal(cluster)
 			if err != nil {
-				logger.Error(err, "Error marshaling cluster to YAML, not dumping")
+				t.Errorf("Error marshaling Cluster %s/%s to YAML: %v", clusterNamespace, name, err)
 				return
 			}
 			if err := os.WriteFile(filepath.Join(t.ArtifactDir(), "cluster.yaml"), clusterYAML, 0644); err != nil {
-				logger.Error(err, "Error writing cluster YAML")
+				t.Errorf("Error writing Cluster %s/ %s: %v", clusterNamespace, name, err)
 				return
 			}
 		}()
