@@ -8,26 +8,48 @@ spec:
       expression: device.driver == "sandbox.example.com" &&
         device.attributes["sandbox.example.com"].class == "topology"
 ---
-apiVersion: v1
-kind: ConfigMap
+apiVersion: resource.k8s.io/v1
+kind: ResourceSlice
 metadata:
-  name: topology-devices
-  labels:
-    sandbox.example.com/cluster-devices: ""
-data:
-  pool: topology
-  nodeSelector: |
+  name: topo-level-1
+spec:
+  devices:
+  - attributes:
+      class:
+        string: topology
+    name: topol1
+  driver: sandbox.example.com
+  nodeSelector:
     nodeSelectorTerms:
     - matchExpressions:
       - key: kubernetes.io/hostname
         operator: Exists
-  devices: |
-    - name: topo0
-      attributes:
-        class:
-          string: topology
-
+  pool:
+    generation: 1
+    name: topology
+    resourceSliceCount: 1
 ---
+# apiVersion: v1
+# kind: ConfigMap
+# metadata:
+#   name: topology-devices
+#   labels:
+#     sandbox.example.com/cluster-devices: ""
+# data:
+#   pool: topo-level-2
+#   poolLabelKeys: |
+#     kubernetes.io/hostname
+#   nodeSelector: |
+#     nodeSelectorTerms:
+#     - matchExpressions:
+#       - key: kubernetes.io/hostname
+#         operator: Exists
+#   devices: |
+#     - name: topo0
+#       attributes:
+#         class:
+#           string: topology
+# ---
 apiVersion: resource.k8s.io/v1
 kind: ResourceClaimTemplate
 metadata:

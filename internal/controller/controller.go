@@ -130,8 +130,6 @@ func Run(ctx context.Context, clientset kubernetes.Interface) error {
 	c.controller, err = resourceslice.StartController(ctx, resourceslice.Options{
 		DriverName: "sandbox.example.com",
 		KubeClient: clientset,
-		// TODO: Do these slices get deleted eventually anyway without an owner?
-		// Owner:            &resourceslice.Owner{},
 	})
 	if err != nil {
 		return fmt.Errorf("start ResourceSlice controller: %w", err)
