@@ -38,7 +38,7 @@ jobs:
       - name: Build kind node image
         id: kind-node
         run: |
-          version=v1.36.1
+          version=v1.36.2
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           if ! docker manifest inspect "kindest/node:${version}"; then
             go run sigs.k8s.io/kind build node-image --image "kindest/node:${version}" --type release "${version}"
