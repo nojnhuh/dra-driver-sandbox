@@ -39,6 +39,7 @@ jobs:
       if: matrix.build-mode == 'manual' && matrix.language == 'go'
       run: |
         go build -tags=e2e ./... ./test/...
+        go test -c -tags=e2e ./... ./test/...
     - name: Perform CodeQL Analysis
       uses: github/codeql-action/analyze@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
       with:
