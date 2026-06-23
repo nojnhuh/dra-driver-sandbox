@@ -24,7 +24,6 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
-	applyv1 "k8s.io/client-go/applyconfigurations/core/v1"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
@@ -248,21 +247,116 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 	clusterKustomization := &types.Kustomization{
 		Patches: []types.Patch{
 			{
-				Patch: fmt.Sprintf(`{
+				Patch: `{
 					"apiVersion": "infrastructure.cluster.x-k8s.io/v1beta2",
 					"kind": "DockerMachineTemplate",
 					"metadata": {
-						"name": "quick-start-%s-worker-machinetemplate",
-						"namespace": "%s"
+						"name": "quick-start-default-worker-machinetemplate",
+						"namespace": "` + clusterNamespace + `"
 					},
 					"spec": {
 						"template": {
 							"spec": {
-								"preLoadImages": ["%s"]
+								"preLoadImages": ["` + driverImage + `"]
 							}
 						}
 					}
-				}`, clusterNamespace, clusterNamespace, driverImage),
+				}`,
+			},
+			{
+				Patch: `{
+					"apiVersion": "cluster.x-k8s.io/v1beta2",
+					"kind": "Cluster",
+					"metadata": {
+						"name": "` + name + `",
+						"namespace": "` + clusterNamespace + `"
+					},
+					"spec": {
+						"topology": {
+							"variables": [
+								{
+									"name": "podSecurityStandard",
+									"value": {
+										"enabled": false
+									}
+								}
+							]
+						}
+					}
+				}`,
+			},
+			{
+				Patch: `{
+					"apiVersion": "controlplane.cluster.x-k8s.io/v1beta2",
+					"kind": "KubeadmControlPlaneTemplate",
+					"metadata": {
+						"name": "quick-start-control-plane",
+						"namespace": "` + clusterNamespace + `"
+					},
+					"spec": {
+						"template": {
+							"spec": {
+								"kubeadmConfigSpec": {
+									"clusterConfiguration": {
+										"apiServer": {
+											"extraArgs": [
+												{"name": "runtime-config", "value": "api/all=true"},
+												{"name": "feature-gates", "value": "AllAlpha=true,AllBeta=true"}
+											]
+										},
+										"controllerManager": {
+											"extraArgs": [
+												{"name": "feature-gates", "value": "AllAlpha=true,AllBeta=true"}
+											]
+										},
+										"scheduler": {
+											"extraArgs": [
+												{"name": "feature-gates", "value": "AllAlpha=true,AllBeta=true"}
+											]
+										}
+									},
+									"initConfiguration": {
+										"nodeRegistration": {
+											"kubeletExtraArgs": [
+												{"name": "feature-gates", "value": "AllAlpha=true,AllBeta=true"}
+											]
+										}
+									},
+									"joinConfiguration": {
+										"nodeRegistration": {
+											"kubeletExtraArgs": [
+												{"name": "feature-gates", "value": "AllAlpha=true,AllBeta=true"}
+											]
+										}
+									}
+								}
+							}
+						}
+					}
+				}`,
+			},
+			{
+				Patch: `{
+					"apiVersion": "bootstrap.cluster.x-k8s.io/v1beta2",
+					"kind": "KubeadmConfigTemplate",
+					"metadata": {
+						"name": "quick-start-default-worker-bootstraptemplate",
+						"namespace": "` + clusterNamespace + `"
+					},
+					"spec": {
+						"template": {
+							"spec": {
+								"joinConfiguration": {
+									"nodeRegistration": {
+										"kubeletExtraArgs": [
+											{"name": "feature-gates", "value": "AllAlpha=true"}
+										]
+									}
+								}
+							}
+						}
+					}
+				}`,
 			},
 		},
 	}
@@ -371,16 +465,9 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 		t.Fatal("Error building Kubernetes client:", err)
 	}
 
-	privileged := map[string]string{
-		"pod-security.kubernetes.io/enforce": "privileged",
-		"pod-security.kubernetes.io/audit":   "privileged",
-		"pod-security.kubernetes.io/warn":    "privileged",
-	}
-
 	tigeraOperator := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:   "tigera-operator",
-			Labels: privileged,
+			Name: "tigera-operator",
 		},
 	}
 	err = client.Create(ctx, tigeraOperator)
@@ -465,11 +552,6 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 	kustomizedDriver, err := kustomizeDirectory(driverManifestDirPath, driverKustomization)
 	if err != nil {
 		t.Fatal("Error running kustomize for driver manifests:", err)
-	}
-
-	err = client.Apply(ctx, applyv1.Namespace(driverNamespace).WithLabels(privileged), ctrlclient.FieldOwner(managedFieldOwner))
-	if err != nil {
-		t.Fatal("Error applying driver namespace:", err)
 	}
 	for _, obj := range kustomizedDriver {
 		logger.V(4).Info("Creating driver resource", "apiVersion", obj.GetAPIVersion(), "kind", obj.GetKind(), "namespace", obj.GetNamespace(), "name", obj.GetName())
