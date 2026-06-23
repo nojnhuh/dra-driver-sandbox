@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	tigerav1 "github.com/tigera/operator/api/v1"
 	"helm.sh/helm/v4/pkg/action"
 	"helm.sh/helm/v4/pkg/chart/loader"
 	"helm.sh/helm/v4/pkg/cli"
@@ -460,7 +461,17 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 	if err != nil {
 		t.Fatal("Error getting client config:", err)
 	}
-	client, err := ctrlclient.New(clientConfig, ctrlclient.Options{})
+	sb := runtime.NewSchemeBuilder(
+		scheme.AddToScheme,
+		tigerav1.AddToScheme,
+	)
+	s := runtime.NewScheme()
+	if err := sb.AddToScheme(s); err != nil {
+		t.Fatal("Error building scheme:", err)
+	}
+	client, err := ctrlclient.New(clientConfig, ctrlclient.Options{
+		Scheme: s,
+	})
 	if err != nil {
 		t.Fatal("Error building Kubernetes client:", err)
 	}
@@ -527,6 +538,35 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 	if err != nil {
 		t.Fatal("Error installing Calico chart:", err)
 	}
+	err = wait.PollUntilContextTimeout(ctx, 5*time.Second, 2*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
+		installation := &tigerav1.Installation{}
+		if err := client.Get(ctx, ctrlclient.ObjectKey{Namespace: tigeraOperator.Name, Name: "default"}, installation); err != nil {
+			return false, fmt.Errorf("get Tigera Installation: %w", err)
+		}
+		var hasReadyCond bool
+		for _, cond := range installation.Status.Conditions {
+			if cond.Type != string(tigerav1.ComponentReady) {
+				continue
+			}
+			hasReadyCond = true
+			if cond.ObservedGeneration != installation.Generation {
+				logger.V(5).Info("Tigera Installation needs to be reconciled")
+				return false, nil
+			}
+			if cond.Status != metav1.ConditionStatus(tigerav1.ConditionTrue) {
+				logger.V(5).Info("Tigera Installation is not ready", "status", cond.Status, "reason", cond.Reason, "message", cond.Message)
+				return false, nil
+			}
+		}
+		if !hasReadyCond {
+			logger.V(5).Info("Tigera Installation is missing condition", "type", tigerav1.ComponentReady)
+			return false, nil
+		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatal("Tigera Installation never became Ready:", err)
+	}
 
 	// wait for CAPI ControlPlane, MachineDeployments, MachinePools
 	err = wait.PollUntilContextTimeout(ctx, 1*time.Second, 2*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
@@ -540,9 +580,6 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 	if err != nil {
 		t.Fatal("Machines never became Ready:", err)
 	}
-
-	// TODO: here Calico has initialized enough for the Nodes to become Ready,
-	// but some of its Pods still are not Ready. Do we need to wait for those?
 
 	logger.V(3).Info("Installing DRA driver")
 	driverNamespace := "default"
