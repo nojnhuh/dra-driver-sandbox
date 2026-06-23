@@ -1,0 +1,71 @@
+apiVersion: resource.k8s.io/v1
+kind: DeviceClass
+metadata:
+  name: workload.sandbox.example.com
+spec:
+  selectors:
+  - cel:
+      expression: device.driver == "sandbox.example.com" &&
+        device.attributes["sandbox.example.com"].class == "workload"
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: workload-devices
+  labels:
+    sandbox.example.com/node-local-devices: ""
+data:
+  devices: |
+    - name: workload0
+      attributes:
+        class:
+          string: workload
+---
+apiVersion: resource.k8s.io/v1
+kind: ResourceClaimTemplate
+metadata:
+  name: workload-device
+spec:
+  spec:
+    devices:
+      requests:
+      - name: dev
+        exactly:
+          deviceClassName: workload.sandbox.example.com
+---
+apiVersion: scheduling.k8s.io/v1alpha2
+kind: PodGroup
+metadata:
+  name: workload
+spec:
+  schedulingPolicy:
+    basic: {}
+  resourceClaims:
+  - name: claim
+    resourceClaimTemplateName: workload-device
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: workload
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: workload
+  template:
+    metadata:
+      labels:
+        app: workload
+    spec:
+      containers:
+      - name: ctr
+        image: registry.k8s.io/pause:3.10.1
+        resources:
+          claims:
+          - name: claim
+      schedulingGroup:
+        podGroupName: workload
+      resourceClaims:
+      - name: claim
+        resourceClaimTemplateName: workload-device

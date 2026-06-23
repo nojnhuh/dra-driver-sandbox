@@ -57,6 +57,10 @@ func TestDriver(t *testing.T) {
 					"resource.kubernetes.io/admin-access": "true",
 				},
 			},
+			{
+				name:     "podgroup",
+				manifest: "podgroup.yaml",
+			},
 		}
 
 		for _, test := range tests {
@@ -124,12 +128,14 @@ func testManifest(ctx context.Context, t *testing.T, c clusterHandle, name strin
 			return
 		}
 		for _, obj := range kustomized {
-			err = c.client.Delete(ctx, &obj)
+			err := c.client.Delete(ctx, &obj)
 			if err != nil {
 				t.Errorf("Error deleting test object %s %s %s/%s: %v", obj.GetAPIVersion(), obj.GetKind(), obj.GetNamespace(), obj.GetName(), err)
 				return
 			}
-			err = wait.PollUntilContextTimeout(ctx, 1*time.Second, 30*time.Second, true /*immediate*/, func(ctx context.Context) (bool, error) {
+		}
+		for _, obj := range kustomized {
+			err := wait.PollUntilContextTimeout(ctx, 1*time.Second, 30*time.Second, true /*immediate*/, func(ctx context.Context) (bool, error) {
 				err := c.client.Get(ctx, ctrlclient.ObjectKeyFromObject(&obj), &obj, &ctrlclient.GetOptions{})
 				if !apierrors.IsNotFound(err) {
 					return false, err
