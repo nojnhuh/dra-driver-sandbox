@@ -4,7 +4,7 @@ go 1.26.4
 
 require (
 	github.com/tigera/operator/api v0.0.0-20260623161517-96a818388ddd
-	helm.sh/helm/v4 v4.2.1
+	helm.sh/helm/v4 v4.2.2
 	k8s.io/api v0.36.2
 	k8s.io/apimachinery v0.36.2
 	k8s.io/cli-runtime v0.36.2
