@@ -78,6 +78,7 @@ func createManagementCluster(ctx context.Context, t *testing.T) clusterHandle {
 	kubeConfigPath := filepath.Join(t.TempDir(), "kubeconfig")
 	err := kindBootstrap.Create(bootstrapClusterName,
 		kind.CreateWithKubeconfigPath(kubeConfigPath),
+		kind.CreateWithWaitForReady(2*time.Minute),
 		kind.CreateWithV1Alpha4Config(
 			&kindv1.Cluster{
 				Nodes: []kindv1.Node{
@@ -139,34 +140,6 @@ func createManagementCluster(ctx context.Context, t *testing.T) clusterHandle {
 	})
 	if err != nil {
 		t.Fatal("Error building Kubernetes client:", err)
-	}
-
-	logger.V(5).Info("Waiting for all Nodes to be Ready")
-	nodeIsReady := func(node corev1.Node) bool {
-		for _, cond := range node.Status.Conditions {
-			if cond.Type == corev1.NodeReady &&
-				cond.Status == corev1.ConditionTrue {
-				return true
-			}
-		}
-		return false
-	}
-	err = wait.PollUntilContextTimeout(ctx, 2*time.Second, 2*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
-		nodes := new(corev1.NodeList)
-		err := client.List(ctx, nodes, &ctrlclient.ListOptions{})
-		if err != nil {
-			return false, err
-		}
-		for _, node := range nodes.Items {
-			if !nodeIsReady(node) {
-				logger.V(6).Info("Node is not Ready", "node", klog.KObj(&node))
-				return false, nil
-			}
-		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal("Error waiting for Nodes to become ready:", err)
 	}
 
 	logger.V(5).Info("Initializing Cluster API providers")
