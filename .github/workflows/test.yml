@@ -25,24 +25,25 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      - name: Build driver image
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
-        id: docker-build
-        with:
-          tags: dra-driver-sandbox:latest
-          load: true
       - name: Setup Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: go.work
-      - name: Build kind node image
-        id: kind-node
-        run: |
-          version=v1.36.2
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          if ! docker manifest inspect "kindest/node:${version}"; then
-            go run sigs.k8s.io/kind build node-image --image "kindest/node:${version}" --type release "${version}"
-          fi
+      - parallel:
+        - name: Build driver image
+          uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+          id: docker-build
+          with:
+            tags: dra-driver-sandbox:latest
+            load: true
+        - name: Build kind node image
+          id: kind-node
+          run: |
+            version=v1.36.2
+            echo "version=${version}" >> "$GITHUB_OUTPUT"
+            if ! docker manifest inspect "kindest/node:${version}"; then
+              go run sigs.k8s.io/kind build node-image --image "kindest/node:${version}" --type release "${version}"
+            fi
       - name: Run e2e tests
         run: go test -tags=e2e -artifacts ./test/e2e --kubernetes-version "${{ steps.kind-node.outputs.version }}"
       - name: Upload artifacts
