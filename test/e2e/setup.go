@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	tigerav1 "github.com/tigera/operator/api/v1"
 	"helm.sh/helm/v4/pkg/action"
 	"helm.sh/helm/v4/pkg/chart/loader"
@@ -73,7 +74,7 @@ func createManagementCluster(ctx context.Context, t *testing.T) clusterHandle {
 	logger := klog.FromContext(ctx)
 	logger.V(4).Info("creating management cluster")
 
-	kindBootstrap = kind.NewProvider(kind.ProviderWithLogger(kindLogAdapter{logger.V(5)}))
+	kindBootstrap = kind.NewProvider(kind.ProviderWithLogger(kindLogAdapter{logger.V(5).WithName("kind")}))
 	kubeConfigPath := filepath.Join(t.TempDir(), "kubeconfig")
 	err := kindBootstrap.Create(bootstrapClusterName,
 		kind.CreateWithKubeconfigPath(kubeConfigPath),
@@ -478,7 +479,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 
 	logger.V(3).Info("Installing CNI")
 	helmEnv := cli.New()
-	helmConfig := action.NewConfiguration(action.ConfigurationSetLogger(helmLogger(ctx, t)))
+	helmConfig := action.NewConfiguration(action.ConfigurationSetLogger(logr.ToSlogHandler(logger.WithName("helm"))))
 	helmConfigFlags := genericclioptions.NewConfigFlags(false)
 	helmConfigFlags.KubeConfig = new(kubeConfigFile.Name())
 	err = helmConfig.Init(helmConfigFlags, tigeraOperator.Name, "")
