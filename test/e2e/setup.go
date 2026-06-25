@@ -74,21 +74,25 @@ func createManagementCluster(ctx context.Context, t *testing.T) clusterHandle {
 	logger.V(4).Info("creating management cluster")
 
 	kindBootstrap = kind.NewProvider(kind.ProviderWithLogger(kindLogAdapter{logger.V(5)}))
-	err := kindBootstrap.Create(bootstrapClusterName, kind.CreateWithV1Alpha4Config(
-		&kindv1.Cluster{
-			Nodes: []kindv1.Node{
-				{
-					Role: kindv1.ControlPlaneRole,
-					ExtraMounts: []kindv1.Mount{
-						{
-							HostPath:      "/var/run/docker.sock",
-							ContainerPath: "/var/run/docker.sock",
+	kubeConfigPath := filepath.Join(t.TempDir(), "kubeconfig")
+	err := kindBootstrap.Create(bootstrapClusterName,
+		kind.CreateWithKubeconfigPath(kubeConfigPath),
+		kind.CreateWithV1Alpha4Config(
+			&kindv1.Cluster{
+				Nodes: []kindv1.Node{
+					{
+						Role: kindv1.ControlPlaneRole,
+						ExtraMounts: []kindv1.Mount{
+							{
+								HostPath:      "/var/run/docker.sock",
+								ContainerPath: "/var/run/docker.sock",
+							},
 						},
 					},
 				},
 			},
-		},
-	))
+		),
+	)
 	if err != nil {
 		t.Fatal("Error creating management cluster:", err)
 	}
@@ -111,26 +115,10 @@ func createManagementCluster(ctx context.Context, t *testing.T) clusterHandle {
 			return
 		}
 	})
-
-	kubeConfigData, err := kindBootstrap.KubeConfig(bootstrapClusterName, false)
-	if err != nil {
-		t.Fatal("Error getting kubeconfig for management cluster:", err)
-	}
-	kubeConfigFile, err := os.Create(filepath.Join(t.TempDir(), "kubeconfig"))
-	if err != nil {
-		t.Fatal("Error creating temp file for management cluster kubeconfig:", err)
-	}
-	_, err = io.Copy(kubeConfigFile, strings.NewReader(kubeConfigData))
-	if err != nil {
-		t.Fatal("Error writing kubeconfig:", err)
-	}
-	capiKubeConfig := capiclient.Kubeconfig{
-		Path: kubeConfigFile.Name(),
-	}
-	logger.V(4).Info("kubeconfig written", "path", capiKubeConfig.Path)
+	logger.V(4).Info("created management cluster", "kubeconfig", kubeConfigPath)
 
 	kubeConfig := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(
-		&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeConfigFile.Name()},
+		&clientcmd.ClientConfigLoadingRules{ExplicitPath: kubeConfigPath},
 		&clientcmd.ConfigOverrides{},
 	)
 	clientConfig, err := kubeConfig.ClientConfig()
@@ -195,7 +183,9 @@ func createManagementCluster(ctx context.Context, t *testing.T) clusterHandle {
 		t.Fatal("Error creating CAPI client:", err)
 	}
 	_, err = clusterctl.Init(ctx, capiclient.InitOptions{
-		Kubeconfig:              capiKubeConfig,
+		Kubeconfig: capiclient.Kubeconfig{
+			Path: kubeConfigPath,
+		},
 		WaitProviders:           true,
 		InfrastructureProviders: []string{capiconfig.DockerProviderName},
 	})
@@ -204,7 +194,7 @@ func createManagementCluster(ctx context.Context, t *testing.T) clusterHandle {
 	}
 
 	return clusterHandle{
-		kubeConfig: capiKubeConfig.Path,
+		kubeConfig: kubeConfigPath,
 		client:     client,
 	}
 }
