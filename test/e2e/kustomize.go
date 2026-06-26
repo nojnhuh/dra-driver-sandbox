@@ -8,15 +8,13 @@ import (
 	"os"
 	"path/filepath"
 
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	capiyaml "sigs.k8s.io/cluster-api/util/yaml"
 	"sigs.k8s.io/kustomize/api/krusty"
 	"sigs.k8s.io/kustomize/api/types"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
 	"sigs.k8s.io/yaml"
 )
 
-func kustomizeYAML(input []byte, k *types.Kustomization) ([]unstructured.Unstructured, error) {
+func kustomizeYAML(input []byte, k *types.Kustomization) ([]byte, error) {
 	kustomizeFiles := filesys.MakeFsInMemory()
 	if err := kustomizeFiles.WriteFile("/resources.yaml", input); err != nil {
 		return nil, err
@@ -28,7 +26,7 @@ func kustomizeYAML(input []byte, k *types.Kustomization) ([]unstructured.Unstruc
 	return runKustomize(kustomizeFiles, k)
 }
 
-func kustomizeFile(path string, k *types.Kustomization) ([]unstructured.Unstructured, error) {
+func kustomizeFile(path string, k *types.Kustomization) ([]byte, error) {
 	kustomizeFiles := filesys.MakeFsInMemory()
 
 	manifestData, err := os.ReadFile(path)
@@ -45,7 +43,7 @@ func kustomizeFile(path string, k *types.Kustomization) ([]unstructured.Unstruct
 	return runKustomize(kustomizeFiles, k)
 }
 
-func kustomizeDirectory(dirPath string, k *types.Kustomization) (us []unstructured.Unstructured, retErr error) {
+func kustomizeDirectory(dirPath string, k *types.Kustomization) (us []byte, retErr error) {
 	// Copy the files on disk into an in-memory filesystem to avoid writing a
 	// kustomization to disk.
 	kustomizeFiles := filesys.MakeFsInMemory()
@@ -88,7 +86,7 @@ func kustomizeDirectory(dirPath string, k *types.Kustomization) (us []unstructur
 	return runKustomize(kustomizeFiles, k)
 }
 
-func runKustomize(files filesys.FileSystem, k *types.Kustomization) ([]unstructured.Unstructured, error) {
+func runKustomize(files filesys.FileSystem, k *types.Kustomization) ([]byte, error) {
 	kyaml, err := yaml.Marshal(k)
 	if err != nil {
 		return nil, err
@@ -102,10 +100,5 @@ func runKustomize(files filesys.FileSystem, k *types.Kustomization) ([]unstructu
 	if err != nil {
 		return nil, err
 	}
-	resYAML, err := resMap.AsYaml()
-	if err != nil {
-		return nil, err
-	}
-	u, err := capiyaml.ToUnstructured(resYAML)
-	return u, err
+	return resMap.AsYaml()
 }

@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -16,6 +17,7 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/ktesting"
 	_ "k8s.io/klog/v2/ktesting/init"
+	capiyaml "sigs.k8s.io/cluster-api/util/yaml"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/kustomize/api/types"
 )
@@ -116,7 +118,14 @@ func testManifest(ctx context.Context, t *testing.T, c clusterHandle, name strin
 	if err != nil {
 		t.Fatal("Error running kustomize for test manifest:", err)
 	}
-	for _, obj := range kustomized {
+	if err := os.WriteFile(filepath.Join(t.ArtifactDir(), "manifest.yaml"), kustomized, 0644); err != nil {
+		t.Error("Error writing manifest artifact:", err)
+	}
+	objs, err := capiyaml.ToUnstructured(kustomized)
+	if err != nil {
+		t.Fatal("Error converting manifest objects to unstructured:", err)
+	}
+	for _, obj := range objs {
 		logger.V(4).Info("Creating test resource", "apiVersion", obj.GetAPIVersion(), "kind", obj.GetKind(), "namespace", obj.GetNamespace(), "name", obj.GetName())
 		err = c.client.Apply(ctx, ctrlclient.ApplyConfigurationFromUnstructured(&obj), ctrlclient.FieldOwner(managedFieldOwner))
 		if err != nil {
@@ -127,14 +136,14 @@ func testManifest(ctx context.Context, t *testing.T, c clusterHandle, name strin
 		if skipCleanup {
 			return
 		}
-		for _, obj := range kustomized {
+		for _, obj := range objs {
 			err := c.client.Delete(ctx, &obj)
 			if err != nil {
 				t.Errorf("Error deleting test object %s %s %s/%s: %v", obj.GetAPIVersion(), obj.GetKind(), obj.GetNamespace(), obj.GetName(), err)
 				return
 			}
 		}
-		for _, obj := range kustomized {
+		for _, obj := range objs {
 			err := wait.PollUntilContextTimeout(ctx, 1*time.Second, 30*time.Second, true /*immediate*/, func(ctx context.Context) (bool, error) {
 				err := c.client.Get(ctx, ctrlclient.ObjectKeyFromObject(&obj), &obj, &ctrlclient.GetOptions{})
 				if !apierrors.IsNotFound(err) {

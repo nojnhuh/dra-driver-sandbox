@@ -34,6 +34,7 @@ import (
 	capiconfig "sigs.k8s.io/cluster-api/cmd/clusterctl/client/config"
 	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/conditions"
+	capiyaml "sigs.k8s.io/cluster-api/util/yaml"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 	kindv1 "sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 	kind "sigs.k8s.io/kind/pkg/cluster"
@@ -46,6 +47,7 @@ var (
 	skipCleanup           = false
 	driverManifestDirPath = filepath.Join("..", "..", "deploy")
 	testManifestDirPath   = filepath.Join("..", "..", "manifests")
+	clusterDirPath        = filepath.Join("..", "..", "clusters")
 	driverImage           = "dra-driver-sandbox:latest"
 	kubernetesVersion     = ""
 )
@@ -192,29 +194,18 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 	if err != nil {
 		t.Fatal("Error creating CAPI client:", err)
 	}
-	template, err := clusterctl.GetClusterTemplate(ctx, capiclient.GetClusterTemplateOptions{
-		Kubeconfig:  capiclient.Kubeconfig{Path: h.kubeConfig},
-		ClusterName: name,
-		ProviderRepositorySource: &capiclient.ProviderRepositorySourceOptions{
-			Flavor: "development",
-		},
-		KubernetesVersion:  kubernetesVersion,
-		WorkerMachineCount: new(int64(1)),
-	})
+	template, err := os.ReadFile(filepath.Join(clusterDirPath, "capd", "default.yaml"))
 	if err != nil {
-		t.Fatal("Error getting CAPI template:", err)
-	}
-	templateYAML, err := template.Yaml()
-	if err != nil {
-		t.Fatal("Error getting YAML for cluster template:", err)
+		t.Fatal("Error reading cluster template:", err)
 	}
 
 	clusterKustomization := &types.Kustomization{
+		Namespace: clusterNamespace,
 		Patches: []types.Patch{
 			{
 				Patch: `{
 					"apiVersion": "infrastructure.cluster.x-k8s.io/v1beta2",
-					"kind": "DockerMachineTemplate",
+					"kind": "DevMachineTemplate",
 					"metadata": {
 						"name": "quick-start-default-worker-machinetemplate",
 						"namespace": "` + clusterNamespace + `"
@@ -222,7 +213,11 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 					"spec": {
 						"template": {
 							"spec": {
-								"preLoadImages": ["` + driverImage + `"]
+								"backend": {
+									"docker": {
+										"preLoadImages": ["` + driverImage + `"]
+									}
+								}
 							}
 						}
 					}
@@ -238,14 +233,12 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 					},
 					"spec": {
 						"topology": {
-							"variables": [
-								{
-									"name": "podSecurityStandard",
-									"value": {
-										"enabled": false
-									}
-								}
-							]
+							"version": "` + kubernetesVersion + `",
+							"workers": {
+								"machineDeployments": [
+									{"class": "default-worker", "name": "md-0", "replicas": 1}
+								]
+							}
 						}
 					}
 				}`,
@@ -325,16 +318,24 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 			},
 		},
 	}
-	kustomizedCluster, err := kustomizeYAML(templateYAML, clusterKustomization)
+	kustomizedCluster, err := kustomizeYAML(template, clusterKustomization)
 	if err != nil {
 		t.Fatal("Error running kustomize for cluster template:", err)
 	}
+	if err := os.WriteFile(filepath.Join(t.ArtifactDir(), "cluster-template.yaml"), []byte(kustomizedCluster), 0644); err != nil {
+		t.Error("Error writing cluster template artifact:", err)
+	}
 
+	kustomizedObjs, err := capiyaml.ToUnstructured(kustomizedCluster)
+	if err != nil {
+		t.Fatal("Error converting cluster template to unstructured:", err)
+	}
 	err = wait.PollUntilContextTimeout(ctx, 10*time.Second, 1*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
-		for _, obj := range kustomizedCluster {
+		for _, obj := range kustomizedObjs {
 			err := h.client.Apply(ctx, ctrlclient.ApplyConfigurationFromUnstructured(&obj), ctrlclient.FieldOwner(managedFieldOwner))
 			// API server returns 500 when webhooks are unreachable
-			if apierrors.IsInternalError(err) {
+			// and when patches are invalid(???)
+			if apierrors.IsInternalError(err) && strings.Contains(err.Error(), "failed calling webhook") {
 				return false, nil
 			}
 			if err != nil {
@@ -556,7 +557,14 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 	if err != nil {
 		t.Fatal("Error running kustomize for driver manifests:", err)
 	}
-	for _, obj := range kustomizedDriver {
+	if err := os.WriteFile(filepath.Join(t.ArtifactDir(), "dra-driver-sandbox.yaml"), kustomizedDriver, 0644); err != nil {
+		t.Error("Error writing driver components artifact:", err)
+	}
+	driverObjs, err := capiyaml.ToUnstructured(kustomizedDriver)
+	if err != nil {
+		t.Fatal("Error converting driver objects to unstructured:", err)
+	}
+	for _, obj := range driverObjs {
 		logger.V(4).Info("Creating driver resource", "apiVersion", obj.GetAPIVersion(), "kind", obj.GetKind(), "namespace", obj.GetNamespace(), "name", obj.GetName())
 		err = client.Apply(ctx, ctrlclient.ApplyConfigurationFromUnstructured(&obj), ctrlclient.FieldOwner(managedFieldOwner))
 		if err != nil {
