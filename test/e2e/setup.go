@@ -425,6 +425,8 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 	if err != nil {
 		t.Fatal("Error getting client config:", err)
 	}
+	clientConfig.QPS = 20
+	clientConfig.Burst = 50
 	sb := runtime.NewSchemeBuilder(
 		scheme.AddToScheme,
 		tigerav1.AddToScheme,
