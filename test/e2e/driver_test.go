@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,8 +12,11 @@ import (
 
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	resourcev1 "k8s.io/api/resource/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/ktesting"
@@ -155,6 +159,32 @@ func testManifest(ctx context.Context, t *testing.T, c clusterHandle, name strin
 				t.Errorf("Error waiting for test object %s %s %s/%s to be gone: %v", obj.GetAPIVersion(), obj.GetKind(), obj.GetNamespace(), obj.GetName(), err)
 				logger.Info("Object dump", "object", klog.Format(obj))
 				return
+			}
+		}
+	})
+	t.Cleanup(func() {
+		if !t.Failed() {
+			return
+		}
+		lists := []ctrlclient.ObjectList{
+			&appsv1.DeploymentList{},
+			&corev1.PodList{},
+			&resourcev1.ResourceClaimList{},
+			&corev1.EventList{},
+		}
+		for _, list := range lists {
+			err := c.client.List(ctx, list, ctrlclient.InNamespace(namespace.Name))
+			if err != nil {
+				t.Errorf("Error getting %T: %v", list, err)
+				continue
+			}
+			err = meta.EachListItem(list, func(o runtime.Object) error {
+				logger.V(5).Info("Object dump", "type", fmt.Sprintf("%T", o), "obj", klog.Format(o))
+				return nil
+			})
+			if err != nil {
+				t.Errorf("Error iterating over %T: %v", list, err)
+				continue
 			}
 		}
 	})
