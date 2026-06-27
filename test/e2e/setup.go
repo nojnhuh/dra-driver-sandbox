@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	tigerav1 "github.com/tigera/operator/api/v1"
 	"helm.sh/helm/v4/pkg/action"
 	"helm.sh/helm/v4/pkg/chart/loader"
 	"helm.sh/helm/v4/pkg/cli"
@@ -384,7 +383,6 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	clientConfig.Burst = 50
 	sb := runtime.NewSchemeBuilder(
 		scheme.AddToScheme,
-		tigerav1.AddToScheme,
 	)
 	s := runtime.NewScheme()
 	if err := sb.AddToScheme(s); err != nil {
@@ -407,6 +405,10 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 		t.Fatalf("Error creating %s namespace: %v", tigeraOperator.Name, err)
 	}
 
+	// CAAPH would be the most CAPI-native way to do this. The Calico chart
+	// relies on CRDs though and CAAPH doesn't converge very quickly if the CRDs
+	// don't get installed before the resources. CAAPH doesn't make it practical
+	// to synchronize those.
 	logger.V(3).Info("Installing CNI")
 	helmEnv := cli.New()
 	helmConfig := action.NewConfiguration(action.ConfigurationSetLogger(logr.ToSlogHandler(logger.V(2).WithName("helm"))))
@@ -426,7 +428,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	calicoCRDInstall.ReleaseName = "calico-crds"
 	calicoCRDInstall.WaitStrategy = kube.StatusWatcherStrategy
 	calicoCRDInstall.WaitOptions = []kube.WaitOption{kube.WithWaitContext(ctx)}
-	calicoCRDPath, err := calicoCharts.LocateChart("crd.projectcalico.org.v1", helmEnv)
+	calicoCRDPath, err := calicoCharts.LocateChart("projectcalico.org.v3", helmEnv)
 	if err != nil {
 		t.Fatal("Error locating Calico CRD chart:", err)
 	}
@@ -443,7 +445,11 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	calicoInstall.ReleaseName = "calico"
 	calicoInstall.Namespace = tigeraOperator.Name
 	calicoInstall.WaitStrategy = kube.StatusWatcherStrategy
-	calicoInstall.WaitOptions = []kube.WaitOption{kube.WithWaitContext(ctx)}
+	calicoInstall.WaitOptions = []kube.WaitOption{
+		kube.WithWaitContext(ctx),
+		kube.WithKStatusReaders(&tigeraStatusReader{}),
+	}
+	calicoInstall.Timeout = 2 * time.Minute
 	calicoPath, err := calicoCharts.LocateChart("tigera-operator", helmEnv)
 	if err != nil {
 		t.Fatal("Error locating Calico chart:", err)
@@ -458,35 +464,6 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	})
 	if err != nil {
 		t.Fatal("Error installing Calico chart:", err)
-	}
-	err = wait.PollUntilContextTimeout(ctx, 5*time.Second, 2*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
-		installation := &tigerav1.Installation{}
-		if err := client.Get(ctx, ctrlclient.ObjectKey{Namespace: tigeraOperator.Name, Name: "default"}, installation); err != nil {
-			return false, fmt.Errorf("get Tigera Installation: %w", err)
-		}
-		var hasReadyCond bool
-		for _, cond := range installation.Status.Conditions {
-			if cond.Type != string(tigerav1.ComponentReady) {
-				continue
-			}
-			hasReadyCond = true
-			if cond.ObservedGeneration != installation.Generation {
-				logger.V(5).Info("Tigera Installation needs to be reconciled")
-				return false, nil
-			}
-			if cond.Status != metav1.ConditionStatus(tigerav1.ConditionTrue) {
-				logger.V(5).Info("Tigera Installation is not ready", "status", cond.Status, "reason", cond.Reason, "message", cond.Message)
-				return false, nil
-			}
-		}
-		if !hasReadyCond {
-			logger.V(5).Info("Tigera Installation is missing condition", "type", tigerav1.ComponentReady)
-			return false, nil
-		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal("Tigera Installation never became Ready:", err)
 	}
 
 	// wait for CAPI ControlPlane, MachineDeployments, MachinePools
