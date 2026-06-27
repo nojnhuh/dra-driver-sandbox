@@ -120,31 +120,31 @@ spec:
         valueFrom:
           template: |
             name: feature-gates
-            value: {{ .featureGates }}
+            value: "{{ .featureGates }}"
       - op: add
         path: "/spec/template/spec/kubeadmConfigSpec/clusterConfiguration/controllerManager/extraArgs/-"
         valueFrom:
           template: |
             name: feature-gates
-            value: {{ .featureGates }}
+            value: "{{ .featureGates }}"
       - op: add
         path: "/spec/template/spec/kubeadmConfigSpec/clusterConfiguration/scheduler/extraArgs/-"
         valueFrom:
           template: |
             name: feature-gates
-            value: {{ .featureGates }}
+            value: "{{ .featureGates }}"
       - op: add
         path: "/spec/template/spec/kubeadmConfigSpec/initConfiguration/nodeRegistration/kubeletExtraArgs/-"
         valueFrom:
           template: |
             name: feature-gates
-            value: {{ .featureGates }}
+            value: "{{ .featureGates }}"
       - op: add
         path: "/spec/template/spec/kubeadmConfigSpec/joinConfiguration/nodeRegistration/kubeletExtraArgs/-"
         valueFrom:
           template: |
             name: feature-gates
-            value: {{ .featureGates }}
+            value: "{{ .featureGates }}"
     - selector:
         apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
         kind: KubeadmConfigTemplate
@@ -158,7 +158,7 @@ spec:
         valueFrom:
           template: |
             name: feature-gates
-            value: {{ .featureGates }}
+            value: "{{ .featureGates }}"
   - name: runtimeConfig
     description: "Sets the --runtime-config flag for kube-apiserver."
     definitions:
@@ -173,7 +173,7 @@ spec:
         valueFrom:
           template: |
             name: runtime-config
-            value: {{ .runtimeConfig }}
+            value: "{{ .runtimeConfig }}"
   - name: preLoadImages
     description: "Sets the docker images to pre-load onto worker nodes."
     definitions:

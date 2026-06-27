@@ -4,6 +4,7 @@ package e2e
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -20,6 +21,7 @@ import (
 	"helm.sh/helm/v4/pkg/kube"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -532,5 +534,86 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	return clusterHandle{
 		kubeConfig: kubeConfigFile.Name(),
 		client:     client,
+	}
+}
+
+type defaultClusterOpts struct {
+	namePrefix    string
+	featureGates  string
+	runtimeConfig string
+}
+
+func buildDefaultCluster(opts defaultClusterOpts) *clusterv1.Cluster {
+	jsonMustMarshal := func(v any) []byte {
+		b, err := json.Marshal(v)
+		if err != nil {
+			panic(err)
+		}
+		return b
+	}
+	namePrefix := "default"
+	if opts.namePrefix != "" {
+		namePrefix = opts.namePrefix
+	}
+	return &clusterv1.Cluster{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: namePrefix + "-",
+			Namespace:    "default",
+			Labels: map[string]string{
+				"cni": "calico",
+			},
+		},
+		Spec: clusterv1.ClusterSpec{
+			ClusterNetwork: clusterv1.ClusterNetwork{
+				Pods: clusterv1.NetworkRanges{
+					CIDRBlocks: []string{"192.168.0.0/16"},
+				},
+				ServiceDomain: "cluster.local",
+				Services: clusterv1.NetworkRanges{
+					CIDRBlocks: []string{"10.128.0.0/12"},
+				},
+			},
+			Topology: clusterv1.Topology{
+				ClassRef: clusterv1.ClusterClassRef{
+					Name:      "default",
+					Namespace: "default",
+				},
+				ControlPlane: clusterv1.ControlPlaneTopology{
+					Replicas: new(int32(1)),
+				},
+				Variables: []clusterv1.ClusterVariable{
+					{
+						Name: "featureGates",
+						Value: apiextensionsv1.JSON{
+							Raw: jsonMustMarshal(opts.featureGates),
+						},
+					},
+					{
+						Name: "runtimeConfig",
+						Value: apiextensionsv1.JSON{
+							Raw: jsonMustMarshal(opts.runtimeConfig),
+						},
+					},
+					{
+						Name: "preLoadImages",
+						Value: apiextensionsv1.JSON{
+							Raw: []byte(`[
+								"` + driverImage + `"
+							]`),
+						},
+					},
+				},
+				Version: kubernetesVersion,
+				Workers: clusterv1.WorkersTopology{
+					MachineDeployments: []clusterv1.MachineDeploymentTopology{
+						{
+							Class:    "worker",
+							Name:     "md-0",
+							Replicas: new(int32(1)),
+						},
+					},
+				},
+			},
+		},
 	}
 }
