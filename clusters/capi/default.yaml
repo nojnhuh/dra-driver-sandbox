@@ -2,6 +2,7 @@ apiVersion: cluster.x-k8s.io/v1beta2
 kind: ClusterClass
 metadata:
   name: default
+  namespace: default
 spec:
   controlPlane:
     templateRef:
@@ -193,11 +194,13 @@ apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
 kind: DevClusterTemplate
 metadata:
   name: default-cluster
+  namespace: default
 ---
 kind: KubeadmControlPlaneTemplate
 apiVersion: controlplane.cluster.x-k8s.io/v1beta2
 metadata:
   name: default-control-plane
+  namespace: default
 spec:
   template:
     spec:
@@ -211,6 +214,7 @@ apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
 kind: DevMachineTemplate
 metadata:
   name: default-control-plane
+  namespace: default
 spec:
   template:
     spec:
@@ -224,6 +228,7 @@ apiVersion: infrastructure.cluster.x-k8s.io/v1beta2
 kind: DevMachineTemplate
 metadata:
   name: default-worker-machinetemplate
+  namespace: default
 spec:
   template:
     spec:
@@ -237,36 +242,39 @@ apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
 kind: KubeadmConfigTemplate
 metadata:
   name: default-worker-bootstraptemplate
+  namespace: default
 ---
-apiVersion: cluster.x-k8s.io/v1beta2
-kind: Cluster
-metadata:
-  name: default
-spec:
-  clusterNetwork:
-    pods:
-      cidrBlocks:
-      - 192.168.0.0/16
-    serviceDomain: cluster.local
-    services:
-      cidrBlocks:
-      - 10.128.0.0/12
-  topology:
-    classRef:
-      name: default
-    controlPlane:
-      replicas: 1
-    variables:
-    - name: featureGates
-      value: AllBeta=true,AllAlpha=true
-    - name: runtimeConfig
-      value: api/all=true
-    - name: preLoadImages
-      value:
-        - dra-driver-sandbox:latest
-    version: v1.36.2
-    workers:
-      machineDeployments:
-      - class: worker
-        name: md-0
-        replicas: 1
+# e.g.
+# apiVersion: cluster.x-k8s.io/v1beta2
+# kind: Cluster
+# metadata:
+#   name: default
+#   namespace: default
+# spec:
+#   clusterNetwork:
+#     pods:
+#       cidrBlocks:
+#       - 192.168.0.0/16
+#     serviceDomain: cluster.local
+#     services:
+#       cidrBlocks:
+#       - 10.128.0.0/12
+#   topology:
+#     classRef:
+#       name: default
+#     controlPlane:
+#       replicas: 1
+#     variables:
+#     - name: featureGates
+#       value: AllBeta=true,AllAlpha=true
+#     - name: runtimeConfig
+#       value: api/all=true
+#     - name: preLoadImages
+#       value:
+#         - dra-driver-sandbox:latest
+#     version: v1.36.2
+#     workers:
+#       machineDeployments:
+#       - class: worker
+#         name: md-0
+#         replicas: 1

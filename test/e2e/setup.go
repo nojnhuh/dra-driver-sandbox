@@ -24,6 +24,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
 	"k8s.io/client-go/kubernetes/scheme"
@@ -32,7 +33,6 @@ import (
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	capiclient "sigs.k8s.io/cluster-api/cmd/clusterctl/client"
 	capiconfig "sigs.k8s.io/cluster-api/cmd/clusterctl/client/config"
-	"sigs.k8s.io/cluster-api/util"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	capiyaml "sigs.k8s.io/cluster-api/util/yaml"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -169,16 +169,179 @@ func createManagementCluster(ctx context.Context, t *testing.T) clusterHandle {
 		t.Fatal("Error initializing CAPI providers:", err)
 	}
 
+	clusterClassesPath := filepath.Join(clusterDirPath, "capi")
+	clusterClassesDir, err := os.ReadDir(clusterClassesPath)
+	if err != nil {
+		t.Fatal("Error reading ClusterClass directory:", err)
+	}
+	clusterClassNames := sets.New[ctrlclient.ObjectKey]()
+	for _, entry := range clusterClassesDir {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".yaml") {
+			continue
+		}
+		logger.V(5).Info("Creating ClusterClass", "filename", entry.Name())
+		template, err := os.ReadFile(filepath.Join(clusterClassesPath, entry.Name()))
+		if err != nil {
+			t.Fatal("Error reading cluster template:", err)
+		}
+		unstructuredObjs, err := capiyaml.ToUnstructured(template)
+		if err != nil {
+			t.Fatal("Error converting cluster template to unstructured:", err)
+		}
+		err = wait.PollUntilContextTimeout(ctx, 10*time.Second, 1*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
+			for _, obj := range unstructuredObjs {
+				err := client.Apply(ctx, ctrlclient.ApplyConfigurationFromUnstructured(&obj), ctrlclient.FieldOwner(managedFieldOwner))
+				// API server returns 500 when webhooks are unreachable
+				// and when patches are invalid(???)
+				if apierrors.IsInternalError(err) && strings.Contains(err.Error(), "failed calling webhook") {
+					return false, nil
+				}
+				if err != nil {
+					return false, err
+				}
+				apiGroup, _, _ := strings.Cut(obj.GetAPIVersion(), "/")
+				if apiGroup == clusterv1.GroupVersion.Group && obj.GetKind() == clusterv1.ClusterClassKind {
+					clusterClassNames.Insert(ctrlclient.ObjectKey{Namespace: obj.GetNamespace(), Name: obj.GetName()})
+				}
+			}
+			return true, nil
+		})
+		if err != nil {
+			t.Fatal("Error applying ClusterClass template:", err)
+		}
+	}
+
+	t.Cleanup(func() {
+		var clusterClasses []*clusterv1.ClusterClass
+		func() {
+			for clusterClassKey := range clusterClassNames {
+				clusterClass := &clusterv1.ClusterClass{}
+				err := client.Get(ctx, clusterClassKey, clusterClass)
+				if err != nil {
+					t.Errorf("Error getting ClusterClass %s: %v", clusterClassKey, err)
+					return
+				}
+				clusterClasses = append(clusterClasses, clusterClass)
+
+				clusterClassYAML, err := yaml.Marshal(clusterClass)
+				if err != nil {
+					t.Errorf("Error marshaling ClusterClass to YAML: %v", err)
+					return
+				}
+				clusterClassPath := filepath.Join(t.ArtifactDir(), "clusterclass", clusterClassKey.Namespace)
+				if err := os.MkdirAll(clusterClassPath, 0755); err != nil {
+					t.Errorf("Error creating directory for ClusterClass %s: %v", clusterClassKey, err)
+					return
+				}
+				if err := os.WriteFile(filepath.Join(clusterClassPath, clusterClassKey.Name+".yaml"), clusterClassYAML, 0644); err != nil {
+					t.Errorf("Error writing ClusterClass %s: %v", clusterClassKey, err)
+					return
+				}
+			}
+		}()
+		if skipCleanup {
+			return
+		}
+		for _, clusterClass := range clusterClasses {
+			clusterClassKey := ctrlclient.ObjectKeyFromObject(clusterClass)
+			err := client.Delete(ctx, clusterClass)
+			if err != nil {
+				t.Errorf("Error deleting ClusterClass %s: %v", clusterClassKey, err)
+				continue
+			}
+			defer func() {
+				err = wait.PollUntilContextTimeout(ctx, 5*time.Second, 5*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
+					err := client.Get(ctx, clusterClassKey, clusterClass)
+					if !apierrors.IsNotFound(err) {
+						return false, err
+					}
+					return true, nil
+				})
+				if err != nil {
+					t.Errorf("Error waiting for ClusterClass %s to be gone: %v", clusterClassKey, err)
+				}
+			}()
+		}
+	})
+
 	return clusterHandle{
 		kubeConfig: kubeConfigPath,
 		client:     client,
 	}
 }
 
-func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name string) clusterHandle {
+func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *clusterv1.Cluster) clusterHandle {
 	logger := klog.FromContext(ctx)
 
-	clusterNamespace := "default"
+	clusterYAML, err := yaml.Marshal(cluster)
+	if err != nil {
+		t.Error("Error marshaling Cluster YAML:", err)
+	} else {
+		if err := os.WriteFile(filepath.Join(t.ArtifactDir(), "cluster-before-create.yaml"), clusterYAML, 0644); err != nil {
+			t.Error("Error writing cluster template artifact:", err)
+		}
+	}
+
+	if loggerV := logger.V(6); loggerV.Enabled() {
+		logger.Info("Creating Cluster", "dump", klog.Format(cluster))
+	} else {
+		logger.Info("Creating Cluster")
+	}
+
+	err = h.client.Create(ctx, cluster, ctrlclient.FieldOwner(managedFieldOwner))
+	if err != nil {
+		t.Fatal("Error creating cluster:", err)
+	}
+	logger = logger.WithValues("cluster", klog.KObj(cluster))
+	clusterKey := ctrlclient.ObjectKeyFromObject(cluster)
+	t.Cleanup(func() {
+		func() {
+			err := h.client.Get(ctx, clusterKey, cluster)
+			if err != nil {
+				t.Errorf("Error getting Cluster %s: %v", clusterKey, err)
+				return
+			}
+			clusterYAML, err := yaml.Marshal(cluster)
+			if err != nil {
+				t.Errorf("Error marshaling Cluster %s to YAML: %v", clusterKey, err)
+				return
+			}
+			if err := os.WriteFile(filepath.Join(t.ArtifactDir(), "cluster-after-test.yaml"), clusterYAML, 0644); err != nil {
+				t.Errorf("Error writing Cluster %s: %v", clusterKey, err)
+				return
+			}
+		}()
+		if skipCleanup {
+			return
+		}
+		err = h.client.Delete(ctx, cluster)
+		if err != nil {
+			t.Errorf("Error deleting Cluster %s: %v", clusterKey, err)
+			return
+		}
+		err = wait.PollUntilContextTimeout(ctx, 5*time.Second, 5*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
+			err := h.client.Get(ctx, ctrlclient.ObjectKeyFromObject(cluster), cluster)
+			if !apierrors.IsNotFound(err) {
+				return false, err
+			}
+			return true, nil
+		})
+		if err != nil {
+			t.Errorf("Error waiting for Cluster %s to be gone: %v", clusterKey, err)
+			return
+		}
+	})
+
+	err = wait.PollUntilContextTimeout(ctx, 1*time.Second, 2*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
+		err := h.client.Get(ctx, clusterKey, cluster)
+		if err != nil {
+			t.Fatalf("Error getting Cluster %s: %v", clusterKey, err)
+		}
+		return conditions.IsTrue(cluster, clusterv1.ClusterControlPlaneInitializedCondition), nil
+	})
+	if err != nil {
+		t.Fatal("Error waiting for ControlPlane to initialize:", err)
+	}
 
 	// Create a new in-memory reader independent from other tests running in
 	// parallel.
@@ -194,106 +357,13 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 	if err != nil {
 		t.Fatal("Error creating CAPI client:", err)
 	}
-	template, err := os.ReadFile(filepath.Join(clusterDirPath, "capd", "default.yaml"))
-	if err != nil {
-		t.Fatal("Error reading cluster template:", err)
-	}
-
-	clusterKustomization := &types.Kustomization{
-		Namespace: clusterNamespace,
-	}
-	kustomizedCluster, err := kustomizeYAML(template, clusterKustomization)
-	if err != nil {
-		t.Fatal("Error running kustomize for cluster template:", err)
-	}
-	if err := os.WriteFile(filepath.Join(t.ArtifactDir(), "cluster-template.yaml"), []byte(kustomizedCluster), 0644); err != nil {
-		t.Error("Error writing cluster template artifact:", err)
-	}
-
-	kustomizedObjs, err := capiyaml.ToUnstructured(kustomizedCluster)
-	if err != nil {
-		t.Fatal("Error converting cluster template to unstructured:", err)
-	}
-	err = wait.PollUntilContextTimeout(ctx, 10*time.Second, 1*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
-		for _, obj := range kustomizedObjs {
-			err := h.client.Apply(ctx, ctrlclient.ApplyConfigurationFromUnstructured(&obj), ctrlclient.FieldOwner(managedFieldOwner))
-			// API server returns 500 when webhooks are unreachable
-			// and when patches are invalid(???)
-			if apierrors.IsInternalError(err) && strings.Contains(err.Error(), "failed calling webhook") {
-				return false, nil
-			}
-			if err != nil {
-				return false, err
-			}
-		}
-		return true, nil
-	})
-	if err != nil {
-		t.Fatal("Error applying cluster template:", err)
-	}
-	t.Cleanup(func() {
-		cluster := &clusterv1.Cluster{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      name,
-				Namespace: clusterNamespace,
-			},
-		}
-		logger := logger.WithValues("cluster", klog.KObj(cluster))
-		func() {
-			cluster, err := util.GetClusterByName(ctx, h.client, clusterNamespace, name)
-			if err != nil {
-				t.Errorf("Error getting Cluster %s/%s: %v", clusterNamespace, name, err)
-				return
-			}
-			clusterYAML, err := yaml.Marshal(cluster)
-			if err != nil {
-				t.Errorf("Error marshaling Cluster %s/%s to YAML: %v", clusterNamespace, name, err)
-				return
-			}
-			if err := os.WriteFile(filepath.Join(t.ArtifactDir(), "cluster.yaml"), clusterYAML, 0644); err != nil {
-				t.Errorf("Error writing Cluster %s/ %s: %v", clusterNamespace, name, err)
-				return
-			}
-		}()
-		if skipCleanup {
-			return
-		}
-		err = h.client.Delete(ctx, cluster)
-		if err != nil {
-			logger.Error(err, "error deleting cluster")
-			return
-		}
-		err = wait.PollUntilContextTimeout(ctx, 5*time.Second, 5*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
-			err := h.client.Get(ctx, ctrlclient.ObjectKeyFromObject(cluster), &clusterv1.Cluster{}, &ctrlclient.GetOptions{})
-			if !apierrors.IsNotFound(err) {
-				return false, err
-			}
-			return true, nil
-		})
-		if err != nil {
-			logger.Error(err, "error waiting for cluster to be gone", "cluster", klog.KObj(cluster))
-			return
-		}
-	})
-
-	err = wait.PollUntilContextTimeout(ctx, 1*time.Second, 2*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
-		cluster, err := util.GetClusterByName(ctx, h.client, clusterNamespace, name)
-		if err != nil {
-			t.Fatalf("Error getting Cluster %s: %v", name, err)
-		}
-		return conditions.IsTrue(cluster, clusterv1.ClusterControlPlaneInitializedCondition), nil
-	})
-	if err != nil {
-		t.Fatal("Error waiting for ControlPlane to initialize:", err)
-	}
-
 	kubeConfigFile, err := os.Create(filepath.Join(t.TempDir(), "kubeconfig"))
 	if err != nil {
 		t.Fatal("Error creating workload cluster kubeconfig:", err)
 	}
 	kubeConfigData, err := clusterctl.GetKubeconfig(ctx, capiclient.GetKubeconfigOptions{
 		Kubeconfig:          capiclient.Kubeconfig{Path: h.kubeConfig},
-		WorkloadClusterName: name,
+		WorkloadClusterName: cluster.Name,
 	})
 	if err != nil {
 		t.Fatal("Error getting workload cluster kubeconfig:", err)
@@ -339,7 +409,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 
 	logger.V(3).Info("Installing CNI")
 	helmEnv := cli.New()
-	helmConfig := action.NewConfiguration(action.ConfigurationSetLogger(logr.ToSlogHandler(logger.WithName("helm"))))
+	helmConfig := action.NewConfiguration(action.ConfigurationSetLogger(logr.ToSlogHandler(logger.V(2).WithName("helm"))))
 	helmConfigFlags := genericclioptions.NewConfigFlags(false)
 	helmConfigFlags.KubeConfig = new(kubeConfigFile.Name())
 	err = helmConfig.Init(helmConfigFlags, tigeraOperator.Name, "")
@@ -421,9 +491,9 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, name stri
 
 	// wait for CAPI ControlPlane, MachineDeployments, MachinePools
 	err = wait.PollUntilContextTimeout(ctx, 1*time.Second, 2*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
-		cluster, err := util.GetClusterByName(ctx, h.client, clusterNamespace, name)
+		err := h.client.Get(ctx, clusterKey, cluster)
 		if err != nil {
-			return false, fmt.Errorf("get Cluster %s: %w", name, err)
+			return false, fmt.Errorf("get Cluster: %w", err)
 		}
 		return conditions.IsTrue(cluster, clusterv1.ClusterControlPlaneMachinesReadyCondition) &&
 			conditions.IsTrue(cluster, clusterv1.ClusterWorkerMachinesReadyCondition), nil

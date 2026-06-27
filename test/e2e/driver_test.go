@@ -13,6 +13,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
+	v1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -21,6 +22,7 @@ import (
 	"k8s.io/klog/v2"
 	"k8s.io/klog/v2/ktesting"
 	_ "k8s.io/klog/v2/ktesting/init"
+	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
 	capiyaml "sigs.k8s.io/cluster-api/util/yaml"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/kustomize/api/types"
@@ -33,7 +35,66 @@ func TestDriver(t *testing.T) {
 	t.Run("default", func(t *testing.T) {
 		t.Parallel()
 		_, ctx := ktesting.NewTestContext(t)
-		c := createCluster(ctx, t, c, "default")
+
+		cluster := &clusterv1.Cluster{
+			ObjectMeta: metav1.ObjectMeta{
+				GenerateName: "default-",
+				Namespace:    "default",
+			},
+			Spec: clusterv1.ClusterSpec{
+				ClusterNetwork: clusterv1.ClusterNetwork{
+					Pods: clusterv1.NetworkRanges{
+						CIDRBlocks: []string{"192.168.0.0/16"},
+					},
+					ServiceDomain: "cluster.local",
+					Services: clusterv1.NetworkRanges{
+						CIDRBlocks: []string{"10.128.0.0/12"},
+					},
+				},
+				Topology: clusterv1.Topology{
+					ClassRef: clusterv1.ClusterClassRef{
+						Name:      "default",
+						Namespace: "default",
+					},
+					ControlPlane: clusterv1.ControlPlaneTopology{
+						Replicas: new(int32(1)),
+					},
+					Variables: []clusterv1.ClusterVariable{
+						{
+							Name: "featureGates",
+							Value: v1.JSON{
+								Raw: []byte(`"AllBeta=true,AllAlpha=true"`),
+							},
+						},
+						{
+							Name: "runtimeConfig",
+							Value: v1.JSON{
+								Raw: []byte(`"api/all=true"`),
+							},
+						},
+						{
+							Name: "preLoadImages",
+							Value: v1.JSON{
+								Raw: []byte(`[
+									"` + driverImage + `"
+								]`),
+							},
+						},
+					},
+					Version: kubernetesVersion,
+					Workers: clusterv1.WorkersTopology{
+						MachineDeployments: []clusterv1.MachineDeploymentTopology{
+							{
+								Class:    "worker",
+								Name:     "md-0",
+								Replicas: new(int32(1)),
+							},
+						},
+					},
+				},
+			},
+		}
+		c := createCluster(ctx, t, c, cluster)
 
 		tests := []struct {
 			name            string
