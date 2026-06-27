@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/distribution/reference"
 	"github.com/go-logr/logr"
 	"helm.sh/helm/v4/pkg/action"
 	"helm.sh/helm/v4/pkg/chart/loader"
@@ -49,8 +50,12 @@ var (
 	driverManifestDirPath = filepath.Join("..", "..", "deploy")
 	testManifestDirPath   = filepath.Join("..", "..", "manifests")
 	clusterDirPath        = filepath.Join("..", "..", "clusters")
-	driverImage           = "dra-driver-sandbox:latest"
 	kubernetesVersion     = ""
+
+	driverImage = parsedImageRef{
+		Name:    "dra-driver-sandbox",
+		NewName: "dra-driver-sandbox", // don't change by default
+	}
 )
 
 func init() {
@@ -58,8 +63,43 @@ func init() {
 	flag.BoolVar(&skipCleanup, "skip-cleanup", skipCleanup, "Do not delete anything that was created during the test")
 	flag.StringVar(&driverManifestDirPath, "driver-manifest-dir-path", driverManifestDirPath, "path to the directory containing YAML files defining the driver")
 	flag.StringVar(&testManifestDirPath, "test-manifest-dir-path", testManifestDirPath, "path to the directory containing YAML files defining test workloads")
-	flag.StringVar(&driverImage, "driver-image", driverImage, "Full name of the DRA driver's container image")
+	flag.Var(&driverImage, "driver-image", "Full name of the DRA driver's container image")
 	flag.StringVar(&kubernetesVersion, "kubernetes-version", kubernetesVersion, "Kubernetes version used for clusters hosting tests")
+}
+
+type parsedImageRef types.Image
+
+// Set implements [flag.Value].
+func (r *parsedImageRef) Set(val string) error {
+	parsed, err := reference.Parse(val)
+	if err != nil {
+		return err
+	}
+	if named, ok := parsed.(reference.Named); ok {
+		r.NewName = named.Name()
+	}
+	if tagged, ok := parsed.(reference.Tagged); ok {
+		r.NewTag = tagged.Tag()
+	}
+	if digested, ok := parsed.(reference.Digested); ok {
+		r.Digest = digested.Digest().String()
+	}
+	return nil
+}
+
+// String implements [flag.Value].
+func (r *parsedImageRef) String() string {
+	var s strings.Builder
+	s.WriteString(r.NewName)
+	if r.NewTag != "" {
+		s.WriteRune(':')
+		s.WriteString(r.NewTag)
+	}
+	if r.Digest != "" {
+		s.WriteRune('@')
+		s.WriteString(r.Digest)
+	}
+	return s.String()
 }
 
 var (
@@ -485,6 +525,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	driverNamespace := "default"
 	driverKustomization := &types.Kustomization{
 		Namespace: driverNamespace,
+		Images:    []types.Image{types.Image(driverImage)},
 	}
 	kustomizedDriver, err := kustomizeDirectory(driverManifestDirPath, driverKustomization)
 	if err != nil {
@@ -598,7 +639,7 @@ func buildDefaultCluster(opts defaultClusterOpts) *clusterv1.Cluster {
 						Name: "preLoadImages",
 						Value: apiextensionsv1.JSON{
 							Raw: []byte(`[
-								"` + driverImage + `"
+								"` + driverImage.String() + `"
 							]`),
 						},
 					},
