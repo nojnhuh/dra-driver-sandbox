@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/cli-runtime/pkg/genericclioptions"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
@@ -434,8 +436,14 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 		Scheme: s,
 	})
 	if err != nil {
+		t.Fatal("Error building controller-runtime client:", err)
+	}
+	k8sClient, err := kubernetes.NewForConfig(clientConfig)
+	if err != nil {
 		t.Fatal("Error building Kubernetes client:", err)
 	}
+
+	streamPodLogs(ctx, t, k8sClient, "kube-system", metav1.ListOptions{})
 
 	tigeraOperator := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
@@ -507,6 +515,8 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	if err != nil {
 		t.Fatal("Error installing Calico chart:", err)
 	}
+	streamPodLogs(ctx, t, k8sClient, tigeraOperator.Name, metav1.ListOptions{})
+	streamPodLogs(ctx, t, k8sClient, "calico-system", metav1.ListOptions{})
 
 	// wait for CAPI ControlPlane, MachineDeployments, MachinePools
 	err = wait.PollUntilContextTimeout(ctx, 1*time.Second, 2*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
@@ -545,16 +555,17 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 			t.Fatalf("Error applying %s %s/%s: %v", obj.GetKind(), obj.GetNamespace(), obj.GetName(), err)
 		}
 	}
+	kubeletPluginLabels := []string{
+		"app.kubernetes.io/name=dra-driver-sandbox",
+		"app.kubernetes.io/component=kubeletplugin",
+	}
 	err = wait.PollUntilContextTimeout(ctx, 1*time.Second, 60*time.Second, true /*immediate*/, func(ctx context.Context) (bool, error) {
 		daemonSets := new(appsv1.DaemonSetList)
 		err := client.List(
 			ctx,
 			daemonSets,
 			ctrlclient.InNamespace(driverNamespace),
-			ctrlclient.HasLabels{
-				"app.kubernetes.io/name=dra-driver-sandbox",
-				"app.kubernetes.io/component=kubeletplugin",
-			},
+			ctrlclient.HasLabels(kubeletPluginLabels),
 		)
 		if err != nil {
 			return false, err
@@ -571,6 +582,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	if err != nil {
 		t.Fatal("DaemonSet Pods never became Ready:", err)
 	}
+	streamPodLogs(ctx, t, k8sClient, driverNamespace, metav1.ListOptions{LabelSelector: strings.Join(kubeletPluginLabels, ",")})
 
 	return clusterHandle{
 		kubeConfig: kubeConfigFile.Name(),
@@ -657,4 +669,75 @@ func buildDefaultCluster(opts defaultClusterOpts) *clusterv1.Cluster {
 			},
 		},
 	}
+}
+
+func streamPodLogs(ctx context.Context, t *testing.T, client kubernetes.Interface, namespace string, listOpts metav1.ListOptions) {
+	logger := klog.FromContext(ctx)
+
+	var loggingPods *corev1.PodList
+	err := wait.PollUntilContextTimeout(ctx, 2*time.Second, 30*time.Second, true /*immediate*/, func(ctx context.Context) (done bool, err error) {
+		pods, err := client.CoreV1().Pods(namespace).List(ctx, listOpts)
+		if err != nil {
+			return false, fmt.Errorf("list pods: %w", err)
+		}
+		for _, pod := range pods.Items {
+			if pod.Status.Phase != corev1.PodRunning &&
+				pod.Status.Phase != corev1.PodSucceeded &&
+				pod.Status.Phase != corev1.PodFailed {
+				return false, nil
+			}
+		}
+		loggingPods = pods
+		return true, nil
+	})
+	if err != nil {
+		t.Error("Not all Pods started logging")
+		return
+	}
+
+	var wg sync.WaitGroup
+	var logStreams []io.ReadCloser
+	for _, pod := range loggingPods.Items {
+		podDir := filepath.Join(t.ArtifactDir(), "pods", namespace, pod.Name)
+		if err := os.MkdirAll(podDir, 0755); err != nil {
+			t.Errorf("Error creating directory for Pod %s/%s logs: %v", namespace, pod.Name, err)
+			continue
+		}
+		for _, container := range append(pod.Spec.InitContainers, pod.Spec.Containers...) {
+			logReq := client.CoreV1().Pods(namespace).GetLogs(pod.Name, &corev1.PodLogOptions{
+				Container: container.Name,
+				Follow:    true,
+			})
+			logFile, err := os.Create(filepath.Join(podDir, container.Name+".log"))
+			if err != nil {
+				t.Errorf("Error creating log file for Pod %s/%s container %s: %v", namespace, pod.Name, container.Name, err)
+				continue
+			}
+			logger := logger.WithValues("pod", klog.KObj(&pod), "container", container.Name, "path", logFile.Name())
+			logger.V(5).Info("Starting log stream")
+			logs, err := logReq.Stream(ctx)
+			if err != nil {
+				t.Errorf("Error streaming logs for Pod %s/%s container %s: %v", namespace, pod.Name, container.Name, err)
+				continue
+			}
+			logStreams = append(logStreams, logs)
+			wg.Go(func() {
+				_, err := io.Copy(logFile, logs)
+				if err != nil && !strings.Contains(err.Error(), "response body closed") { // "closed" is the normal case
+					t.Errorf("Error writing log file for Pod %s/%s container %s: %v", namespace, pod.Name, container.Name, err)
+				}
+			})
+		}
+	}
+
+	t.Cleanup(func() {
+		for _, logs := range logStreams {
+			err := logs.Close()
+			if err != nil {
+				logger.Error(err, "Error closing log stream")
+			}
+		}
+		wg.Wait()
+		logger.V(6).Info("Closed log streams")
+	})
 }
