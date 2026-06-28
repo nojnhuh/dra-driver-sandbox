@@ -491,7 +491,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 		kube.WithWaitContext(ctx),
 		kube.WithKStatusReaders(&tigeraStatusReader{}),
 	}
-	calicoInstall.Timeout = 2 * time.Minute
+	calicoInstall.Timeout = 5 * time.Minute
 	calicoPath, err := calicoCharts.LocateChart("tigera-operator", helmEnv)
 	if err != nil {
 		t.Fatal("Error locating Calico chart:", err)

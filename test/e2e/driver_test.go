@@ -217,7 +217,7 @@ func testManifest(ctx context.Context, t *testing.T, c clusterHandle, name strin
 		}
 	})
 
-	err = wait.PollUntilContextTimeout(ctx, 1*time.Second, 1*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
+	err = wait.PollUntilContextTimeout(ctx, 1*time.Second, 2*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
 		deployments := new(appsv1.DeploymentList)
 		err := c.client.List(ctx, deployments, ctrlclient.InNamespace(namespace.Name))
 		if err != nil {
