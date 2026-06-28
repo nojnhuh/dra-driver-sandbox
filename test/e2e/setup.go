@@ -444,8 +444,6 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 		t.Fatal("Error building Kubernetes client:", err)
 	}
 
-	streamPodLogs(ctx, t, k8sClient, "kube-system", metav1.ListOptions{})
-
 	tigeraOperator := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "tigera-operator",
@@ -532,6 +530,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	if err != nil {
 		t.Fatal("Machines never became Ready:", err)
 	}
+	streamPodLogs(ctx, t, k8sClient, "kube-system", metav1.ListOptions{})
 
 	logger.V(3).Info("Installing DRA driver")
 	driverNamespace := "default"
@@ -677,7 +676,7 @@ func streamPodLogs(ctx context.Context, t *testing.T, client kubernetes.Interfac
 	logger := klog.FromContext(ctx)
 
 	var loggingPods *corev1.PodList
-	err := wait.PollUntilContextTimeout(ctx, 2*time.Second, 30*time.Second, true /*immediate*/, func(ctx context.Context) (done bool, err error) {
+	err := wait.PollUntilContextTimeout(ctx, 2*time.Second, 1*time.Minute, true /*immediate*/, func(ctx context.Context) (done bool, err error) {
 		pods, err := client.CoreV1().Pods(namespace).List(ctx, listOpts)
 		if err != nil {
 			return false, fmt.Errorf("list pods: %w", err)
@@ -693,7 +692,7 @@ func streamPodLogs(ctx context.Context, t *testing.T, client kubernetes.Interfac
 		return true, nil
 	})
 	if err != nil {
-		t.Error("Not all Pods started logging")
+		t.Error("Not all Pods started logging:", err)
 		return
 	}
 
