@@ -515,8 +515,8 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	if err != nil {
 		t.Fatal("Error installing Calico chart:", err)
 	}
-	streamPodLogs(ctx, t, k8sClient, tigeraOperator.Name, metav1.ListOptions{})
-	streamPodLogs(ctx, t, k8sClient, "calico-system", metav1.ListOptions{})
+	collectPods(ctx, t, k8sClient, tigeraOperator.Name, metav1.ListOptions{})
+	collectPods(ctx, t, k8sClient, "calico-system", metav1.ListOptions{})
 
 	// wait for CAPI ControlPlane, MachineDeployments, MachinePools
 	err = wait.PollUntilContextTimeout(ctx, 1*time.Second, 2*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
@@ -530,7 +530,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	if err != nil {
 		t.Fatal("Machines never became Ready:", err)
 	}
-	streamPodLogs(ctx, t, k8sClient, "kube-system", metav1.ListOptions{})
+	collectPods(ctx, t, k8sClient, "kube-system", metav1.ListOptions{})
 
 	logger.V(3).Info("Installing DRA driver")
 	driverNamespace := "default"
@@ -583,7 +583,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	if err != nil {
 		t.Fatal("DaemonSet Pods never became Ready:", err)
 	}
-	streamPodLogs(ctx, t, k8sClient, driverNamespace, metav1.ListOptions{LabelSelector: strings.Join(kubeletPluginLabels, ",")})
+	collectPods(ctx, t, k8sClient, driverNamespace, metav1.ListOptions{LabelSelector: strings.Join(kubeletPluginLabels, ",")})
 
 	return clusterHandle{
 		kubeConfig: kubeConfigFile.Name(),
@@ -672,7 +672,7 @@ func buildDefaultCluster(opts defaultClusterOpts) *clusterv1.Cluster {
 	}
 }
 
-func streamPodLogs(ctx context.Context, t *testing.T, client kubernetes.Interface, namespace string, listOpts metav1.ListOptions) {
+func collectPods(ctx context.Context, t *testing.T, client kubernetes.Interface, namespace string, listOpts metav1.ListOptions) {
 	logger := klog.FromContext(ctx)
 
 	var loggingPods *corev1.PodList
@@ -696,10 +696,14 @@ func streamPodLogs(ctx context.Context, t *testing.T, client kubernetes.Interfac
 		return
 	}
 
+	podArtifactsDir := func(pod corev1.Pod) string {
+		return filepath.Join(t.ArtifactDir(), "pods", namespace, pod.Name)
+	}
+
 	var wg sync.WaitGroup
 	var logStreams []io.ReadCloser
 	for _, pod := range loggingPods.Items {
-		podDir := filepath.Join(t.ArtifactDir(), "pods", namespace, pod.Name)
+		podDir := podArtifactsDir(pod)
 		if err := os.MkdirAll(podDir, 0755); err != nil {
 			t.Errorf("Error creating directory for Pod %s/%s logs: %v", namespace, pod.Name, err)
 			continue
@@ -740,5 +744,25 @@ func streamPodLogs(ctx context.Context, t *testing.T, client kubernetes.Interfac
 		}
 		wg.Wait()
 		logger.V(6).Info("Closed log streams")
+	})
+
+	t.Cleanup(func() {
+		pods, err := client.CoreV1().Pods(namespace).List(ctx, listOpts)
+		if err != nil {
+			t.Error("Error listing Pods:", err)
+			return
+		}
+		for _, pod := range pods.Items {
+			podDir := podArtifactsDir(pod)
+			podYAML, err := yaml.Marshal(pod)
+			if err != nil {
+				t.Error("Error marshaling Pod to YAML:", err)
+				return
+			}
+			if err := os.WriteFile(filepath.Join(podDir, "pod.yaml"), podYAML, 0644); err != nil {
+				t.Error("Error writing Pod YAML artifact:", err)
+				return
+			}
+		}
 	})
 }
