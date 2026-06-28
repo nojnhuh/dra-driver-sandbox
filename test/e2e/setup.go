@@ -510,8 +510,9 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 		t.Fatal("Error loading Calico chart:", err)
 	}
 	_, err = calicoInstall.RunWithContext(ctx, calicoChart, map[string]any{
-		"goldmane": map[string]any{"enabled": false},
-		"whisker":  map[string]any{"enabled": false},
+		"apiServer": map[string]any{"enabled": false},
+		"goldmane":  map[string]any{"enabled": false},
+		"whisker":   map[string]any{"enabled": false},
 	})
 	if err != nil {
 		t.Fatal("Error installing Calico chart:", err)
