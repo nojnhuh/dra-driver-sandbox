@@ -357,6 +357,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 		if skipCleanup {
 			return
 		}
+		logger.Info("Deleting Cluster")
 		err = h.client.Delete(ctx, cluster)
 		if err != nil {
 			t.Errorf("Error deleting Cluster %s: %v", clusterKey, err)

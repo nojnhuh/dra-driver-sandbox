@@ -233,6 +233,8 @@ func testManifest(ctx context.Context, t *testing.T, c clusterHandle, name strin
 		return true, nil
 	})
 	if err != nil {
-		t.Fatalf("Deployments never became fully available: %v", err)
+		t.Errorf("Deployments never became fully available: %v", err)
+	} else {
+		logger.Info("All Deployment Pods scheduled successfully")
 	}
 }
