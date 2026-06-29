@@ -1,0 +1,8 @@
+# Ignore everything
+**
+
+# Allow only these
+!/cmd/**
+!/internal/**
+!/go.mod
+!/go.sum
