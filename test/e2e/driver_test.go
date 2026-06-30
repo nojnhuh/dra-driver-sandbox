@@ -68,7 +68,7 @@ func TestDriver(t *testing.T) {
 		},
 	}
 
-	t.Run("default", func(t *testing.T) {
+	t.Run("default-ga", func(t *testing.T) {
 		t.Parallel()
 		_, ctx := ktesting.NewTestContext(t)
 
@@ -86,7 +86,7 @@ func TestDriver(t *testing.T) {
 		}
 	})
 
-	t.Run("alpha", func(t *testing.T) {
+	t.Run("default-alpha", func(t *testing.T) {
 		t.Parallel()
 		_, ctx := ktesting.NewTestContext(t)
 
@@ -98,6 +98,24 @@ func TestDriver(t *testing.T) {
 		c := createCluster(ctx, t, c, cluster)
 
 		for _, test := range append(defaultTests, alphaTests...) {
+			t.Run(test.name, func(t *testing.T) {
+				t.Parallel()
+				_, ctx := ktesting.NewTestContext(t)
+				testManifest(ctx, t, c, test.manifest, test.namespaceLabels)
+			})
+		}
+	})
+
+	t.Run("azure-ga", func(t *testing.T) {
+		t.Parallel()
+		_, ctx := ktesting.NewTestContext(t)
+
+		cluster := buildAzureCluster(azureClusterOpts{
+			runtimeConfig: "admissionregistration.k8s.io/v1beta1=true", // For calico chart
+		})
+		c := createCluster(ctx, t, c, cluster)
+
+		for _, test := range defaultTests {
 			t.Run(test.name, func(t *testing.T) {
 				t.Parallel()
 				_, ctx := ktesting.NewTestContext(t)
