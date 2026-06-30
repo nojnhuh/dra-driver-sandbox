@@ -22,6 +22,6 @@ spec:
       containers:
       - name: controller
         image: dra-driver-sandbox-controller
-        imagePullPolicy: Never
+        imagePullPolicy: IfNotPresent
         args:
           - -v=5

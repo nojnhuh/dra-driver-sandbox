@@ -54,6 +54,19 @@ var (
 	clusterDirPath        = filepath.Join("..", "..", "clusters")
 	kubernetesVersion     = ""
 
+	// TODO: define and use ClusterClass variables for these
+	azureTenantID                                  = os.Getenv("AZURE_TENANT_ID")
+	azureSubscriptionID                            = os.Getenv("AZURE_SUBSCRIPTION_ID")
+	azureClientID                                  = os.Getenv("AZURE_CLIENT_ID")
+	azureClusterIdentityType                       = os.Getenv("CLUSTER_IDENTITY_TYPE")
+	azureLocation                                  = os.Getenv("AZURE_LOCATION")
+	azureControlPlaneMachineType                   = os.Getenv("AZURE_CONTROL_PLANE_MACHINE_TYPE")
+	azureNodeMachineType                           = os.Getenv("AZURE_NODE_MACHINE_TYPE")
+	azureSSHPublicKey                              = os.Getenv("AZURE_SSH_PUBLIC_KEY")
+	azureMachineUserAssignedIdentitySubscriptionID = os.Getenv("AZURE_SUBSCRIPTION_ID")
+	azureMachineUserAssignedIdentityResourceGroup  = os.Getenv("CI_RG")
+	azureMachineUserAssignedIdentityName           = os.Getenv("USER_IDENTITY")
+
 	kubeletPluginImage = parsedImageRef{
 		Name:    "dra-driver-sandbox-kubeletplugin",
 		NewName: "dra-driver-sandbox-kubeletplugin", // don't change by default
@@ -72,6 +85,18 @@ func init() {
 	flag.Var(&kubeletPluginImage, "kubelet-plugin-image", "Full name of the DRA driver's kubelet plugin container image")
 	flag.Var(&controllerImage, "controller-image", "Full name of the DRA driver's controller container image")
 	flag.StringVar(&kubernetesVersion, "kubernetes-version", kubernetesVersion, "Kubernetes version used for clusters hosting tests")
+
+	flag.StringVar(&azureTenantID, "azure-tenant-id", azureTenantID, "Azure tenant ID")
+	flag.StringVar(&azureSubscriptionID, "azure-subscription-id", azureSubscriptionID, "Azure subscription ID")
+	flag.StringVar(&azureClientID, "azure-client-id", azureClientID, "Azure client ID")
+	flag.StringVar(&azureClusterIdentityType, "azure-cluster-identity-type", azureClusterIdentityType, "AzureClusterIdentity spec.type")
+	flag.StringVar(&azureLocation, "azure-location", azureLocation, "Azure location")
+	flag.StringVar(&azureControlPlaneMachineType, "azure-control-plane-machine-type", azureControlPlaneMachineType, "Azure control plane machine type")
+	flag.StringVar(&azureNodeMachineType, "azure-node-machine-type", azureNodeMachineType, "Azure node machine type")
+	flag.StringVar(&azureSSHPublicKey, "azure-ssh-public-key", azureSSHPublicKey, "Azure SSH public key")
+	flag.StringVar(&azureMachineUserAssignedIdentitySubscriptionID, "azure-machine-user-assigned-identity-subscription-id", azureMachineUserAssignedIdentitySubscriptionID, "Azure subscription ID of the user-assigned managed identity added to control plane and worker machines")
+	flag.StringVar(&azureMachineUserAssignedIdentityResourceGroup, "azure-machine-user-assigned-identity-resource-group", azureMachineUserAssignedIdentityResourceGroup, "Azure resource group name of the user-assigned managed identity added to control plane and worker machines")
+	flag.StringVar(&azureMachineUserAssignedIdentityName, "azure-machine-user-assigned-identity-name", azureMachineUserAssignedIdentityName, "Azure name of the user-assigned managed identity added to control plane and worker machines")
 }
 
 type parsedImageRef types.Image
@@ -210,8 +235,14 @@ func createManagementCluster(ctx context.Context, t *testing.T) clusterHandle {
 		Kubeconfig: capiclient.Kubeconfig{
 			Path: kubeConfigPath,
 		},
-		WaitProviders:           true,
-		InfrastructureProviders: []string{capiconfig.DockerProviderName},
+		WaitProviders: true,
+		InfrastructureProviders: []string{
+			capiconfig.DockerProviderName,
+			capiconfig.AzureProviderName,
+		},
+		AddonProviders: []string{
+			capiconfig.HelmAddonProviderName,
+		},
 	})
 	if err != nil {
 		t.Fatal("Error initializing CAPI providers:", err)
@@ -368,7 +399,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 			t.Errorf("Error deleting Cluster %s: %v", clusterKey, err)
 			return
 		}
-		err = wait.PollUntilContextTimeout(ctx, 5*time.Second, 5*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
+		err = wait.PollUntilContextTimeout(ctx, 5*time.Second, 15*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
 			err := h.client.Get(ctx, ctrlclient.ObjectKeyFromObject(cluster), cluster)
 			if !apierrors.IsNotFound(err) {
 				return false, err
@@ -381,7 +412,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 		}
 	})
 
-	err = wait.PollUntilContextTimeout(ctx, 1*time.Second, 2*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
+	err = wait.PollUntilContextTimeout(ctx, 5*time.Second, 15*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
 		err := h.client.Get(ctx, clusterKey, cluster)
 		if err != nil {
 			t.Fatalf("Error getting Cluster %s: %v", clusterKey, err)
@@ -559,9 +590,9 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	}
 	for _, obj := range driverObjs {
 		logger.V(4).Info("Creating driver resource", "apiVersion", obj.GetAPIVersion(), "kind", obj.GetKind(), "namespace", obj.GetNamespace(), "name", obj.GetName())
-		err = client.Apply(ctx, ctrlclient.ApplyConfigurationFromUnstructured(&obj), ctrlclient.FieldOwner(managedFieldOwner))
+		err = client.Create(ctx, &obj, ctrlclient.FieldOwner(managedFieldOwner))
 		if err != nil {
-			t.Fatalf("Error applying %s %s/%s: %v", obj.GetKind(), obj.GetNamespace(), obj.GetName(), err)
+			t.Fatalf("Error creating %s %s/%s: %v", obj.GetKind(), obj.GetNamespace(), obj.GetName(), err)
 		}
 	}
 	err = wait.PollUntilContextTimeout(ctx, 1*time.Second, 60*time.Second, true /*immediate*/, func(ctx context.Context) (bool, error) {
@@ -624,6 +655,14 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	}
 }
 
+func jsonMustMarshal(v any) []byte {
+	b, err := json.Marshal(v)
+	if err != nil {
+		panic(err)
+	}
+	return b
+}
+
 type defaultClusterOpts struct {
 	namePrefix    string
 	featureGates  string
@@ -631,13 +670,6 @@ type defaultClusterOpts struct {
 }
 
 func buildDefaultCluster(opts defaultClusterOpts) *clusterv1.Cluster {
-	jsonMustMarshal := func(v any) []byte {
-		b, err := json.Marshal(v)
-		if err != nil {
-			panic(err)
-		}
-		return b
-	}
 	namePrefix := "default"
 	if opts.namePrefix != "" {
 		namePrefix = opts.namePrefix
@@ -646,9 +678,6 @@ func buildDefaultCluster(opts defaultClusterOpts) *clusterv1.Cluster {
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: namePrefix + "-",
 			Namespace:    "default",
-			Labels: map[string]string{
-				"cni": "calico",
-			},
 		},
 		Spec: clusterv1.ClusterSpec{
 			ClusterNetwork: clusterv1.ClusterNetwork{
@@ -688,6 +717,108 @@ func buildDefaultCluster(opts defaultClusterOpts) *clusterv1.Cluster {
 								"` + kubeletPluginImage.String() + `",
 								"` + controllerImage.String() + `"
 							]`),
+						},
+					},
+				},
+				Version: kubernetesVersion,
+				Workers: clusterv1.WorkersTopology{
+					MachineDeployments: []clusterv1.MachineDeploymentTopology{
+						{
+							Class:    "worker",
+							Name:     "md-0",
+							Replicas: new(int32(1)),
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
+type azureClusterOpts struct {
+	namePrefix    string
+	featureGates  string
+	runtimeConfig string
+}
+
+func buildAzureCluster(opts azureClusterOpts) *clusterv1.Cluster {
+	namePrefix := "azure"
+	if opts.namePrefix != "" {
+		namePrefix = opts.namePrefix
+	}
+	return &clusterv1.Cluster{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: namePrefix + "-",
+			Namespace:    "default",
+			Labels: map[string]string{
+				"cloud-provider": "azure",
+			},
+		},
+		Spec: clusterv1.ClusterSpec{
+			ClusterNetwork: clusterv1.ClusterNetwork{
+				Pods: clusterv1.NetworkRanges{
+					CIDRBlocks: []string{"192.168.0.0/16"},
+				},
+			},
+			Topology: clusterv1.Topology{
+				ClassRef: clusterv1.ClusterClassRef{
+					Name:      "azure",
+					Namespace: "default",
+				},
+				ControlPlane: clusterv1.ControlPlaneTopology{
+					Replicas: new(int32(1)),
+				},
+				Variables: []clusterv1.ClusterVariable{
+					{
+						Name: "subscriptionID",
+						Value: apiextensionsv1.JSON{
+							Raw: jsonMustMarshal(azureSubscriptionID),
+						},
+					},
+					{
+						Name: "location",
+						Value: apiextensionsv1.JSON{
+							Raw: jsonMustMarshal(azureLocation),
+						},
+					},
+					{
+						Name: "controlPlaneVMSize",
+						Value: apiextensionsv1.JSON{
+							Raw: jsonMustMarshal(azureControlPlaneMachineType),
+						},
+					},
+					{
+						Name: "workerVMSize",
+						Value: apiextensionsv1.JSON{
+							Raw: jsonMustMarshal(azureNodeMachineType),
+						},
+					},
+					{
+						Name: "sshPublicKey",
+						Value: apiextensionsv1.JSON{
+							Raw: jsonMustMarshal([]byte(azureSSHPublicKey)),
+						},
+					},
+					{
+						Name: "machineUserAssignedIdentity",
+						Value: apiextensionsv1.JSON{
+							Raw: jsonMustMarshal(map[string]any{
+								"subscriptionID": azureMachineUserAssignedIdentitySubscriptionID,
+								"resourceGroup":  azureMachineUserAssignedIdentityResourceGroup,
+								"name":           azureMachineUserAssignedIdentityName,
+							}),
+						},
+					},
+					{
+						Name: "featureGates",
+						Value: apiextensionsv1.JSON{
+							Raw: jsonMustMarshal(opts.featureGates),
+						},
+					},
+					{
+						Name: "runtimeConfig",
+						Value: apiextensionsv1.JSON{
+							Raw: jsonMustMarshal(opts.runtimeConfig),
 						},
 					},
 				},

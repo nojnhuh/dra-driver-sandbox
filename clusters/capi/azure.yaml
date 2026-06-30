@@ -1,0 +1,518 @@
+apiVersion: cluster.x-k8s.io/v1beta2
+kind: ClusterClass
+metadata:
+  name: azure
+  namespace: default
+spec:
+  controlPlane:
+    templateRef:
+      apiVersion: controlplane.cluster.x-k8s.io/v1beta2
+      kind: KubeadmControlPlaneTemplate
+      name: azure-control-plane
+    machineInfrastructure:
+      templateRef:
+        apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+        kind: AzureMachineTemplate
+        name: azure-control-plane
+  infrastructure:
+    templateRef:
+      apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+      kind: AzureClusterTemplate
+      name: azure-cluster
+  variables:
+  - name: subscriptionID
+    required: true
+    schema:
+      openAPIV3Schema:
+        type: string
+        description: "Azure subscription ID."
+  - name: location
+    required: false
+    schema:
+      openAPIV3Schema:
+        type: string
+        default: uksouth
+        description: "Azure location."
+  - name: controlPlaneVMSize
+    required: false
+    schema:
+      openAPIV3Schema:
+        type: string
+        default: Standard_B2s
+        description: "Azure VM size for control plane nodes."
+  - name: workerVMSize
+    required: false
+    schema:
+      openAPIV3Schema:
+        type: string
+        default: Standard_B2s
+        description: "Azure VM size for worker nodes."
+  - name: sshPublicKey
+    required: false
+    schema:
+      openAPIV3Schema:
+        type: string
+        description: "Base64-encoded SSH public key to log in to VMs."
+  - name: machineUserAssignedIdentity
+    required: false
+    schema:
+      openAPIV3Schema:
+        type: object
+        description: "The user-assigned managed identity assigned to control plane and worker machines."
+        properties:
+          subscriptionID:
+            type: string
+          resourceGroup:
+            type: string
+          name:
+            type: string
+  - name: featureGates
+    required: false
+    schema:
+      openAPIV3Schema:
+        type: string
+        default: ""
+        example: "AllBeta=true,DRAWorkloadResourceClaims=true"
+        description: "Kubernetes feature gates to enable in kube-apiserver, kube-controller-manager, kube-scheduler, and kubelet."
+  - name: runtimeConfig
+    required: false
+    schema:
+      openAPIV3Schema:
+        type: string
+        default: ""
+        example: "api/beta=true,scheduling.k8s.io/v1alpha3=true"
+        description: "APIs to enable in kube-apiserver via --runtime-config."
+  patches:
+  - name: subscriptionID
+    description: "Azure subscription ID."
+    definitions:
+    - selector:
+        apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+        kind: AzureClusterTemplate
+        matchResources:
+          infrastructureCluster: true
+      jsonPatches:
+      - op: add
+        path: "/spec/template/spec/subscriptionID"
+        valueFrom:
+          variable: subscriptionID
+  - name: location
+    description: "Azure location."
+    enabledIf: "{{ if .location }}true{{ end }}"
+    definitions:
+    - selector:
+        apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+        kind: AzureClusterTemplate
+        matchResources:
+          infrastructureCluster: true
+      jsonPatches:
+      - op: add
+        path: "/spec/template/spec/location"
+        valueFrom:
+          variable: location
+  - name: controlPlaneVMSize
+    description: "Adds vmSize for control plane machines."
+    enabledIf: "{{ if .controlPlaneVMSize }}true{{ end }}"
+    definitions:
+    - selector:
+        apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+        kind: AzureMachineTemplate
+        matchResources:
+          controlPlane: true
+      jsonPatches:
+      - op: add
+        path: "/spec/template/spec/vmSize"
+        valueFrom:
+          variable: controlPlaneVMSize
+  - name: workerVMSize
+    description: "Adds vmSize for worker machines."
+    enabledIf: "{{ if .workerVMSize }}true{{ end }}"
+    definitions:
+    - selector:
+        apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+        kind: AzureMachineTemplate
+        matchResources:
+          machineDeploymentClass:
+            names:
+              - worker
+      jsonPatches:
+      - op: add
+        path: "/spec/template/spec/vmSize"
+        valueFrom:
+          variable: workerVMSize
+  - name: sshPublicKey
+    description: "Adds base64-encoded SSH public keys to VMs."
+    enabledIf: "{{ if .sshPublicKey }}true{{ end }}"
+    definitions:
+    - selector:
+        apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+        kind: AzureMachineTemplate
+        matchResources:
+          controlPlane: true
+          machineDeploymentClass:
+            names:
+              - worker
+      jsonPatches:
+      - op: add
+        path: "/spec/template/spec/sshPublicKey"
+        valueFrom:
+          variable: sshPublicKey
+  - name: machineUserAssignedManagedIdentity
+    description: "Adds a user-assigned managed identity to control plane and worker machines."
+    enabledIf: |
+      {{ if (and (or .machineUserAssignedIdentity.subscriptionID .subscriptionID) .machineUserAssignedIdentity.resourceGroup .machineUserAssignedIdentity.name) }}true{{ end }}
+    definitions:
+    - selector:
+        apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+        kind: AzureMachineTemplate
+        matchResources:
+          controlPlane: true
+          machineDeploymentClass:
+            names:
+            - worker
+      jsonPatches:
+      - op: add
+        path: "/spec/template/spec/identity"
+        value: UserAssigned
+      - op: add
+        path: "/spec/template/spec/userAssignedIdentities"
+        valueFrom:
+          template: |
+            - providerID: azure:///subscriptions/{{ or .machineUserAssignedIdentity.subscriptionID .subscriptionID }}/resourceGroups/{{ .machineUserAssignedIdentity.resourceGroup }}/providers/Microsoft.ManagedIdentity/userAssignedIdentities/{{ .machineUserAssignedIdentity.name }}
+  - name: featureGates
+    description: "Sets featureGates in the KubeadmControlPlaneTemplate and KubeadmConfigTemplates for kube-apiserver, kube-controller-manager, kube-scheduler, and kubelet."
+    definitions:
+    - selector:
+        apiVersion: controlplane.cluster.x-k8s.io/v1beta2
+        kind: KubeadmControlPlaneTemplate
+        matchResources:
+          controlPlane: true
+      jsonPatches:
+      - op: add
+        path: "/spec/template/spec/kubeadmConfigSpec/clusterConfiguration/apiServer"
+        valueFrom:
+          template: |
+            extraArgs:
+            - name: feature-gates
+              value: "{{ .featureGates }}"
+      - op: add
+        path: "/spec/template/spec/kubeadmConfigSpec/clusterConfiguration/controllerManager/extraArgs/-"
+        valueFrom:
+          template: |
+            name: feature-gates
+            value: "{{ .featureGates }}"
+      - op: add
+        path: "/spec/template/spec/kubeadmConfigSpec/clusterConfiguration/scheduler"
+        valueFrom:
+          template: |
+            extraArgs:
+            - name: feature-gates
+              value: "{{ .featureGates }}"
+      - op: add
+        path: "/spec/template/spec/kubeadmConfigSpec/initConfiguration/nodeRegistration/kubeletExtraArgs/-"
+        valueFrom:
+          template: |
+            name: feature-gates
+            value: "{{ .featureGates }}"
+      - op: add
+        path: "/spec/template/spec/kubeadmConfigSpec/joinConfiguration/nodeRegistration/kubeletExtraArgs/-"
+        valueFrom:
+          template: |
+            name: feature-gates
+            value: "{{ .featureGates }}"
+    - selector:
+        apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
+        kind: KubeadmConfigTemplate
+        matchResources:
+          machineDeploymentClass:
+            names:
+            - worker
+      jsonPatches:
+      - op: add
+        path: "/spec/template/spec/joinConfiguration/nodeRegistration/kubeletExtraArgs/-"
+        valueFrom:
+          template: |
+            name: feature-gates
+            value: "{{ .featureGates }}"
+  - name: runtimeConfig
+    description: "Sets the --runtime-config flag for kube-apiserver."
+    definitions:
+    - selector:
+        apiVersion: controlplane.cluster.x-k8s.io/v1beta2
+        kind: KubeadmControlPlaneTemplate
+        matchResources:
+          controlPlane: true
+      jsonPatches:
+      - op: add
+        path: "/spec/template/spec/kubeadmConfigSpec/clusterConfiguration/apiServer/extraArgs/-"
+        valueFrom:
+          template: |
+            name: runtime-config
+            value: "{{ .runtimeConfig }}"
+  - name: controlPlaneAzureJsonSecretName
+    definitions:
+    - jsonPatches:
+      - op: add
+        path: /spec/template/spec/kubeadmConfigSpec/clusterConfiguration/controllerManager/extraArgs/-
+        valueFrom:
+          template: |
+            name: cluster-name
+            value: "{{ .builtin.cluster.name }}"
+      - op: replace
+        path: /spec/template/spec/kubeadmConfigSpec/files
+        valueFrom:
+          template: |
+            - contentFrom:
+                secret:
+                  key: control-plane-azure.json
+                  name: "{{ .builtin.controlPlane.machineTemplate.infrastructureRef.name }}-azure-json"
+              owner: root:root
+              path: /etc/kubernetes/azure.json
+              permissions: "0644"
+      selector:
+        apiVersion: controlplane.cluster.x-k8s.io/v1beta2
+        kind: KubeadmControlPlaneTemplate
+        matchResources:
+          controlPlane: true
+  - name: workerAzureJsonSecretName
+    definitions:
+    - jsonPatches:
+      - op: replace
+        path: /spec/template/spec/files
+        valueFrom:
+          template: |
+            - contentFrom:
+                secret:
+                  key: worker-node-azure.json
+                  name: "{{ .builtin.machineDeployment.infrastructureRef.name }}-azure-json"
+              owner: root:root
+              path: /etc/kubernetes/azure.json
+              permissions: "0644"
+      selector:
+        apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
+        kind: KubeadmConfigTemplate
+        matchResources:
+          machineDeploymentClass:
+            names:
+            - worker
+  workers:
+    machineDeployments:
+    - class: worker
+      bootstrap:
+        templateRef:
+          apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
+          kind: KubeadmConfigTemplate
+          name: azure-worker
+      infrastructure:
+        templateRef:
+          apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+          kind: AzureMachineTemplate
+          name: azure-worker
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: AzureClusterTemplate
+metadata:
+  name: azure-cluster
+  namespace: default
+spec:
+  template:
+    spec:
+      identityRef:
+        apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+        kind: AzureClusterIdentity
+        name: azure-identity
+      networkSpec:
+        subnets:
+        - name: control-plane-subnet
+          role: control-plane
+        - name: node-subnet
+          natGateway:
+            name: node-natgateway
+          role: node
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: AzureMachineTemplate
+metadata:
+  name: azure-control-plane
+  namespace: default
+spec:
+  template:
+    spec:
+      dataDisks:
+      - diskSizeGB: 256
+        lun: 0
+        nameSuffix: etcddisk
+      osDisk:
+        diskSizeGB: 128
+        osType: Linux
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: AzureMachineTemplate
+metadata:
+  name: azure-worker
+  namespace: default
+spec:
+  template:
+    spec:
+      osDisk:
+        diskSizeGB: 128
+        osType: Linux
+---
+apiVersion: controlplane.cluster.x-k8s.io/v1beta2
+kind: KubeadmControlPlaneTemplate
+metadata:
+  name: azure-control-plane
+  namespace: default
+spec:
+  template:
+    spec:
+      kubeadmConfigSpec:
+        clusterConfiguration:
+          controllerManager:
+            extraArgs:
+              - name: allocate-node-cidrs
+                value: "false"
+              - name: cloud-provider
+                value: external
+          etcd:
+            local:
+              dataDir: /var/lib/etcddisk/etcd
+              extraArgs:
+                - name: quota-backend-bytes
+                  value: "8589934592"
+        diskSetup:
+          filesystems:
+          - device: /dev/disk/azure/scsi1/lun0
+            extraOpts:
+            - -E
+            - lazy_itable_init=1,lazy_journal_init=1
+            filesystem: ext4
+            label: etcd_disk
+          - device: ephemeral0.1
+            filesystem: ext4
+            label: ephemeral0
+            replaceFS: ntfs
+          partitions:
+          - device: /dev/disk/azure/scsi1/lun0
+            layout: true
+            overwrite: false
+            tableType: gpt
+        files:
+        - contentFrom:
+            secret:
+              key: control-plane-azure.json
+              name: replace_me
+          owner: root:root
+          path: /etc/kubernetes/azure.json
+          permissions: "0644"
+        initConfiguration:
+          nodeRegistration:
+            kubeletExtraArgs:
+              - name: cloud-provider
+                value: external
+              - name: image-credential-provider-bin-dir
+                value: /var/lib/kubelet/credential-provider
+              - name: image-credential-provider-config
+                value: /var/lib/kubelet/credential-provider-config.yaml
+            name: '{{ ds.meta_data["local_hostname"] }}'
+        joinConfiguration:
+          nodeRegistration:
+            kubeletExtraArgs:
+              - name: cloud-provider
+                value: external
+              - name: image-credential-provider-bin-dir
+                value: /var/lib/kubelet/credential-provider
+              - name: image-credential-provider-config
+                value: /var/lib/kubelet/credential-provider-config.yaml
+            name: '{{ ds.meta_data["local_hostname"] }}'
+        mounts:
+        - - LABEL=etcd_disk
+          - /var/lib/etcddisk
+        verbosity: 5
+---
+apiVersion: bootstrap.cluster.x-k8s.io/v1beta2
+kind: KubeadmConfigTemplate
+metadata:
+  name: azure-worker
+  namespace: default
+spec:
+  template:
+    spec:
+      files:
+      - contentFrom:
+          secret:
+            key: worker-node-azure.json
+            name: replace_me
+        owner: root:root
+        path: /etc/kubernetes/azure.json
+        permissions: "0644"
+      joinConfiguration:
+        nodeRegistration:
+          kubeletExtraArgs:
+            - name: cloud-provider
+              value: external
+            - name: image-credential-provider-bin-dir
+              value: /var/lib/kubelet/credential-provider
+            - name: image-credential-provider-config
+              value: /var/lib/kubelet/credential-provider-config.yaml
+          name: '{{ ds.meta_data["local_hostname"] }}'
+---
+apiVersion: addons.cluster.x-k8s.io/v1alpha1
+kind: HelmChartProxy
+metadata:
+  name: cloud-provider-azure
+  namespace: default
+spec:
+  clusterSelector:
+    matchLabels:
+      cloud-provider: "azure"
+  repoURL: https://raw.githubusercontent.com/kubernetes-sigs/cloud-provider-azure/master/helm/repo
+  chartName: cloud-provider-azure
+  releaseName: cloud-provider-azure
+  valuesTemplate: |
+    infra:
+      clusterName: {{ .Cluster.metadata.name }}
+    cloudControllerManager:
+      clusterCIDR: {{ .Cluster.spec.clusterNetwork.pods.cidrBlocks | join "," }}
+      logVerbosity: 4
+---
+apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+kind: AzureClusterIdentity
+metadata:
+  labels:
+    clusterctl.cluster.x-k8s.io/move-hierarchy: "true"
+  name: azure-identity
+  namespace: default
+spec:
+  allowedNamespaces: {}
+  clientID: 2e91c68d-fa69-42c1-a965-4e7856facb61 # TODO: variable
+  tenantID: 72f988bf-86f1-41af-91ab-2d7cd011db47 # TODO: variable
+  type: UserAssignedMSI # TODO: variable
+---
+# e.g.
+# apiVersion: cluster.x-k8s.io/v1beta2
+# kind: Cluster
+# metadata:
+#   name: azure
+#   namespace: default
+# spec:
+#   clusterNetwork:
+#     pods:
+#       cidrBlocks:
+#       - 192.168.0.0/16
+#   topology:
+#     classRef:
+#       name: azure
+#     controlPlane:
+#       replicas: 1
+#     variables:
+#     - name: featureGates
+#       value: AllBeta=true,AllAlpha=true
+#     - name: runtimeConfig
+#       value: api/all=true
+#     version: v1.36.2
+#     workers:
+#       machineDeployments:
+#       - class: worker
+#         name: md-0
+#         replicas: 1
