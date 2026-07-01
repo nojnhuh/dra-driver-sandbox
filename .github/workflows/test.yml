@@ -36,7 +36,7 @@ jobs:
           cache-dependency-path: "**/go.mod"
       - parallel:
         - name: Build kubelet plugin image
-          uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+          uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
           id: docker-build
           with:
             build-args: |
@@ -44,7 +44,7 @@ jobs:
             tags: dra-driver-sandbox-kubeletplugin:latest
             load: true
         - name: Build controller image
-          uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+          uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
           with:
             build-args: |
               cmd=dra-driver-sandbox-controller
