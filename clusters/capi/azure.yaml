@@ -26,6 +26,12 @@ spec:
       openAPIV3Schema:
         type: string
         description: "Azure subscription ID."
+  - name: clusterIdentityName
+    required: true
+    schema:
+      openAPIV3Schema:
+        type: string
+        description: "AzureClusterIdentity name."
   - name: location
     required: false
     schema:
@@ -96,6 +102,22 @@ spec:
         path: "/spec/template/spec/subscriptionID"
         valueFrom:
           variable: subscriptionID
+  - name: clusterIdentityName
+    description: "AzureClusterIdentity name."
+    definitions:
+    - selector:
+        apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+        kind: AzureClusterTemplate
+        matchResources:
+          infrastructureCluster: true
+      jsonPatches:
+      - op: add
+        path: "/spec/template/spec/identityRef"
+        valueFrom:
+          template: |
+            apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+            kind: AzureClusterIdentity
+            name: {{ .clusterIdentityName }}
   - name: location
     description: "Azure location."
     enabledIf: "{{ if .location }}true{{ end }}"
@@ -317,10 +339,6 @@ metadata:
 spec:
   template:
     spec:
-      identityRef:
-        apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
-        kind: AzureClusterIdentity
-        name: azure-identity
       networkSpec:
         subnets:
         - name: control-plane-subnet
@@ -476,19 +494,6 @@ spec:
       clusterCIDR: {{ .Cluster.spec.clusterNetwork.pods.cidrBlocks | join "," }}
       logVerbosity: 4
 ---
-apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
-kind: AzureClusterIdentity
-metadata:
-  labels:
-    clusterctl.cluster.x-k8s.io/move-hierarchy: "true"
-  name: azure-identity
-  namespace: default
-spec:
-  allowedNamespaces: {}
-  clientID: 2e91c68d-fa69-42c1-a965-4e7856facb61 # TODO: variable
-  tenantID: 72f988bf-86f1-41af-91ab-2d7cd011db47 # TODO: variable
-  type: UserAssignedMSI # TODO: variable
----
 # e.g.
 # apiVersion: cluster.x-k8s.io/v1beta2
 # kind: Cluster
@@ -516,3 +521,16 @@ spec:
 #       - class: worker
 #         name: md-0
 #         replicas: 1
+# ---
+# apiVersion: infrastructure.cluster.x-k8s.io/v1beta1
+# kind: AzureClusterIdentity
+# metadata:
+#   labels:
+#     clusterctl.cluster.x-k8s.io/move-hierarchy: "true"
+#   name: azure-identity
+#   namespace: default
+# spec:
+#   allowedNamespaces: {}
+#   clientID: 2e91c68d-fa69-42c1-a965-4e7856facb61
+#   tenantID: 72f988bf-86f1-41af-91ab-2d7cd011db47
+#   type: UserAssignedMSI

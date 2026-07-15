@@ -39,6 +39,7 @@ import (
 	capiconfig "sigs.k8s.io/cluster-api/cmd/clusterctl/client/config"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	capiyaml "sigs.k8s.io/cluster-api/util/yaml"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 	kindv1 "sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 	kind "sigs.k8s.io/kind/pkg/cluster"
@@ -54,7 +55,6 @@ var (
 	clusterDirPath        = filepath.Join("..", "..", "clusters")
 	kubernetesVersion     = ""
 
-	// TODO: define and use ClusterClass variables for these
 	azureTenantID                                  = os.Getenv("AZURE_TENANT_ID")
 	azureSubscriptionID                            = os.Getenv("AZURE_SUBSCRIPTION_ID")
 	azureClientID                                  = os.Getenv("AZURE_CLIENT_ID")
@@ -349,7 +349,7 @@ func createManagementCluster(ctx context.Context, t *testing.T) clusterHandle {
 	}
 }
 
-func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *clusterv1.Cluster) clusterHandle {
+func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *clusterv1.Cluster, objs ...ctrlclient.Object) clusterHandle {
 	logger := klog.FromContext(ctx)
 
 	clusterYAML, err := yaml.Marshal(cluster)
@@ -366,6 +366,40 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	} else {
 		logger.Info("Creating Cluster")
 	}
+
+	for _, obj := range objs {
+		err = h.client.Create(ctx, obj, ctrlclient.FieldOwner(managedFieldOwner))
+		if err != nil {
+			t.Fatal("Error creating object:", err)
+		}
+	}
+	t.Cleanup(func() {
+		if skipCleanup {
+			return
+		}
+		for _, obj := range objs {
+			objKey := ctrlclient.ObjectKeyFromObject(obj)
+			err = h.client.Delete(ctx, obj)
+			if client.IgnoreNotFound(err) != nil {
+				t.Errorf("Error deleting object %s: %v", objKey, err)
+				return
+			}
+		}
+		for _, obj := range objs {
+			objKey := ctrlclient.ObjectKeyFromObject(obj)
+			err = wait.PollUntilContextTimeout(ctx, 5*time.Second, 1*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
+				err := h.client.Get(ctx, objKey, obj)
+				if !apierrors.IsNotFound(err) {
+					return false, err
+				}
+				return true, nil
+			})
+			if err != nil {
+				t.Errorf("Error waiting for object %s to be gone: %v", objKey, err)
+				return
+			}
+		}
+	})
 
 	err = h.client.Create(ctx, cluster, ctrlclient.FieldOwner(managedFieldOwner))
 	if err != nil {
@@ -736,9 +770,10 @@ func buildDefaultCluster(opts defaultClusterOpts) *clusterv1.Cluster {
 }
 
 type azureClusterOpts struct {
-	namePrefix    string
-	featureGates  string
-	runtimeConfig string
+	namePrefix          string
+	featureGates        string
+	runtimeConfig       string
+	clusterIdentityName string
 }
 
 func buildAzureCluster(opts azureClusterOpts) *clusterv1.Cluster {
@@ -773,6 +808,12 @@ func buildAzureCluster(opts azureClusterOpts) *clusterv1.Cluster {
 						Name: "subscriptionID",
 						Value: apiextensionsv1.JSON{
 							Raw: jsonMustMarshal(azureSubscriptionID),
+						},
+					},
+					{
+						Name: "clusterIdentityName",
+						Value: apiextensionsv1.JSON{
+							Raw: jsonMustMarshal(opts.clusterIdentityName),
 						},
 					},
 					{

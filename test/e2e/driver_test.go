@@ -16,6 +16,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/klog/v2"
@@ -110,10 +111,27 @@ func TestDriver(t *testing.T) {
 		t.Parallel()
 		_, ctx := ktesting.NewTestContext(t)
 
+		azureClusterIdentity := &unstructured.Unstructured{
+			Object: map[string]any{
+				"apiVersion": "infrastructure.cluster.x-k8s.io/v1beta1",
+				"kind":       "AzureClusterIdentity",
+				"metadata": map[string]any{
+					"name":      "azure-identity",
+					"namespace": "default",
+				},
+				"spec": map[string]any{
+					"allowedNamespaces": map[string]any{},
+					"clientID":          azureClientID,
+					"tenantID":          azureTenantID,
+					"type":              azureClusterIdentityType,
+				},
+			},
+		}
 		cluster := buildAzureCluster(azureClusterOpts{
-			runtimeConfig: "admissionregistration.k8s.io/v1beta1=true", // For calico chart
+			runtimeConfig:       "admissionregistration.k8s.io/v1beta1=true", // For calico chart
+			clusterIdentityName: azureClusterIdentity.GetName(),
 		})
-		c := createCluster(ctx, t, c, cluster)
+		c := createCluster(ctx, t, c, cluster, azureClusterIdentity)
 
 		for _, test := range defaultTests {
 			t.Run(test.name, func(t *testing.T) {
