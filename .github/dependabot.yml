@@ -1,9 +1,7 @@
 version: 2
 updates:
   - package-ecosystem: gomod
-    directories:
-      - /
-      - /test
+    directory: /
     schedule:
       interval: weekly
       day: wednesday
