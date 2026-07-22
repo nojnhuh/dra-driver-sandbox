@@ -5,7 +5,7 @@ go 1.26.4
 require (
 	github.com/distribution/reference v0.6.0
 	github.com/fluxcd/cli-utils v1.2.2
-	github.com/go-logr/logr v1.4.3
+	github.com/go-logr/logr v1.4.4
 	helm.sh/helm/v4 v4.2.3
 	k8s.io/api v0.36.2
 	k8s.io/apiextensions-apiserver v0.36.2
