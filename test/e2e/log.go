@@ -16,28 +16,28 @@ type kindLogAdapter struct {
 
 // Error implements [log.Logger].
 func (k kindLogAdapter) Error(message string) {
-	helper, logger := k.Logger.WithCallStackHelper()
+	helper, logger := k.WithCallStackHelper()
 	helper()
 	logger.Error(nil, strings.TrimSpace(message))
 }
 
 // Errorf implements [log.Logger].
 func (k kindLogAdapter) Errorf(format string, args ...any) {
-	helper, logger := k.Logger.WithCallStackHelper()
+	helper, logger := k.WithCallStackHelper()
 	helper()
 	logger.Error(nil, fmt.Sprintf(strings.TrimSpace(format), args...))
 }
 
 // Warn implements [log.Logger].
 func (k kindLogAdapter) Warn(message string) {
-	helper, logger := k.Logger.WithCallStackHelper()
+	helper, logger := k.WithCallStackHelper()
 	helper()
 	logger.Info(strings.TrimSpace(message))
 }
 
 // Warnf implements [log.Logger].
 func (k kindLogAdapter) Warnf(format string, args ...any) {
-	helper, logger := k.Logger.WithCallStackHelper()
+	helper, logger := k.WithCallStackHelper()
 	helper()
 	logger.Info(fmt.Sprintf(strings.TrimSpace(format), args...))
 }
@@ -53,14 +53,14 @@ type kindInfoLogAdapter struct {
 
 // Info implements [log.InfoLogger].
 func (k kindInfoLogAdapter) Info(message string) {
-	helper, logger := k.Logger.WithCallStackHelper()
+	helper, logger := k.WithCallStackHelper()
 	helper()
 	logger.Info(strings.TrimSpace(message))
 }
 
 // Infof implements [log.InfoLogger].
 func (k kindInfoLogAdapter) Infof(format string, args ...any) {
-	helper, logger := k.Logger.WithCallStackHelper()
+	helper, logger := k.WithCallStackHelper()
 	helper()
 	logger.Info(fmt.Sprintf(strings.TrimSpace(format), args...))
 }

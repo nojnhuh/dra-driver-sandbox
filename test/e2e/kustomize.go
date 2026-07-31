@@ -14,18 +14,6 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-func kustomizeYAML(input []byte, k *types.Kustomization) ([]byte, error) {
-	kustomizeFiles := filesys.MakeFsInMemory()
-	if err := kustomizeFiles.WriteFile("/resources.yaml", input); err != nil {
-		return nil, err
-	}
-	if k.Resources == nil {
-		k.Resources = []string{"/resources.yaml"}
-	}
-
-	return runKustomize(kustomizeFiles, k)
-}
-
 func kustomizeFile(path string, k *types.Kustomization) ([]byte, error) {
 	kustomizeFiles := filesys.MakeFsInMemory()
 

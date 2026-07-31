@@ -39,7 +39,6 @@ import (
 	capiconfig "sigs.k8s.io/cluster-api/cmd/clusterctl/client/config"
 	"sigs.k8s.io/cluster-api/util/conditions"
 	capiyaml "sigs.k8s.io/cluster-api/util/yaml"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 	kindv1 "sigs.k8s.io/kind/pkg/apis/config/v1alpha4"
 	kind "sigs.k8s.io/kind/pkg/cluster"
@@ -380,7 +379,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 		for _, obj := range objs {
 			objKey := ctrlclient.ObjectKeyFromObject(obj)
 			err = h.client.Delete(ctx, obj)
-			if client.IgnoreNotFound(err) != nil {
+			if ctrlclient.IgnoreNotFound(err) != nil {
 				t.Errorf("Error deleting object %s: %v", objKey, err)
 				return
 			}
