@@ -133,3 +133,8 @@ func (d *driver) HandleError(ctx context.Context, err error, msg string) {
 		d.cancel(fatalError{err})
 	}
 }
+
+// WatchHealthStatus implements [kubeletplugin.DRAPlugin].
+func (d *driver) WatchHealthStatus(ctx context.Context, reports chan<- kubeletplugin.DeviceHealthReport) error {
+	return kubeletplugin.ErrHealthNotSupported
+}
