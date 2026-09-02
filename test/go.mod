@@ -4,7 +4,7 @@ go 1.26.4
 
 require (
 	github.com/distribution/reference v0.6.0
-	github.com/fluxcd/cli-utils v1.2.2
+	github.com/fluxcd/cli-utils v1.2.3
 	github.com/go-logr/logr v1.4.4
 	helm.sh/helm/v4 v4.2.4
 	k8s.io/api v0.36.4
@@ -144,7 +144,7 @@ require (
 	k8s.io/cluster-bootstrap v0.35.4 // indirect
 	k8s.io/component-base v0.36.4 // indirect
 	k8s.io/kube-openapi v0.0.0-20260317180543-43fb72c5454a // indirect
-	k8s.io/kubectl v0.36.2 // indirect
+	k8s.io/kubectl v0.36.4 // indirect
 	k8s.io/utils v0.0.0-20260507154919-ff6756f316d2 // indirect
 	oras.land/oras-go/v2 v2.6.1 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
