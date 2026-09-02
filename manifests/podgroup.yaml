@@ -33,7 +33,7 @@ spec:
         exactly:
           deviceClassName: workload.sandbox.example.com
 ---
-apiVersion: scheduling.k8s.io/v1alpha2
+apiVersion: scheduling.k8s.io/v1beta1
 kind: PodGroup
 metadata:
   name: workload
