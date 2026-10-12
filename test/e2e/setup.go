@@ -21,6 +21,7 @@ import (
 	"helm.sh/helm/v4/pkg/chart/loader"
 	"helm.sh/helm/v4/pkg/cli"
 	"helm.sh/helm/v4/pkg/kube"
+	"helm.sh/helm/v4/pkg/release"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apiextensionsv1 "k8s.io/apiextensions-apiserver/pkg/apis/apiextensions/v1"
@@ -544,8 +545,11 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	calicoCRDInstall := action.NewInstall(helmConfig)
 	calicoCRDInstall.Namespace = tigeraOperator.Name
 	calicoCRDInstall.ReleaseName = "calico-crds"
-	calicoCRDInstall.WaitStrategy = kube.StatusWatcherStrategy
-	calicoCRDInstall.WaitOptions = []kube.WaitOption{kube.WithWaitContext(ctx)}
+	// CRDs, though packaged in a Helm chart, cannot be installed by Helm lol.
+	// Instead, emulate `helm template | kubectl create -f -` like the docs.
+	//
+	//     create: failed to create: Secret "sh.helm.release.v1.calico-crds.v1" is invalid: data: Too long: may not be more than 1048576 bytes
+	calicoCRDInstall.DryRunStrategy = action.DryRunServer
 	calicoCRDPath, err := calicoCharts.LocateChart("projectcalico.org.v3", helmEnv)
 	if err != nil {
 		t.Fatal("Error locating Calico CRD chart:", err)
@@ -554,9 +558,23 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	if err != nil {
 		t.Fatal("Error loading Calico CRD chart:", err)
 	}
-	_, err = calicoCRDInstall.RunWithContext(ctx, calicoCRDChart, nil)
+	calicoCRDRelease, err := calicoCRDInstall.RunWithContext(ctx, calicoCRDChart, nil)
 	if err != nil {
 		t.Fatal("Error installing Calico CRD chart:", err)
+	}
+	calicoCRDAccessor, err := release.NewAccessor(calicoCRDRelease)
+	if err != nil {
+		t.Fatal("Error accessing Calico CRD release:", err)
+	}
+	calicoCRDs, err := capiyaml.ToUnstructured([]byte(calicoCRDAccessor.Manifest()))
+	if err != nil {
+		t.Fatal("Error converting Calico CRDs to unstructured:", err)
+	}
+	for _, crd := range calicoCRDs {
+		err := client.Create(ctx, &crd, ctrlclient.FieldOwner(managedFieldOwner))
+		if err != nil {
+			t.Fatalf("Error installing Calico CRD %s: %v", crd.GetName(), err)
+		}
 	}
 
 	calicoInstall := action.NewInstall(helmConfig)
