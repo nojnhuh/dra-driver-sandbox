@@ -1,0 +1,3 @@
+//go:generate find . -type f -name "zz_generated.*.go" -delete
+//go:generate go -C tools tool controller-gen object paths=../...
+package root
