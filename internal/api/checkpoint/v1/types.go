@@ -18,4 +18,6 @@ type Checkpoint struct {
 
 type PreparedClaim struct {
 	UID types.UID
+
+	Jon struct{}
 }
