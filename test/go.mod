@@ -1,10 +1,10 @@
 module github.com/nojnhuh/dra-driver-sandbox/test
 
-go 1.26.4
+go 1.27.0
 
 require (
 	github.com/distribution/reference v0.6.0
-	github.com/fluxcd/cli-utils v1.3.0
+	github.com/fluxcd/cli-utils v1.4.0
 	github.com/go-logr/logr v1.4.4
 	helm.sh/helm/v4 v4.3.1
 	k8s.io/api v0.37.1
@@ -16,7 +16,7 @@ require (
 	sigs.k8s.io/cluster-api v1.13.4
 	sigs.k8s.io/controller-runtime v0.25.2
 	sigs.k8s.io/kind v0.33.0
-	sigs.k8s.io/kustomize/api v0.21.1
+	sigs.k8s.io/kustomize/api v0.21.2
 	sigs.k8s.io/kustomize/kyaml v0.21.2
 	sigs.k8s.io/yaml v1.6.0
 )
