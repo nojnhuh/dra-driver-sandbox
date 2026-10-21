@@ -109,6 +109,7 @@ func (d *driver) PrepareResourceClaims(ctx context.Context, claims []*resourcev1
 	result = make(map[types.UID]kubeletplugin.PrepareResult)
 	for _, claim := range claims {
 		logger.V(4).Info("Preparing claim", "claim", klog.KObj(claim), "uid", claim.UID)
+		// TODO: read/write checkpoint
 		result[claim.UID] = kubeletplugin.PrepareResult{}
 	}
 	return
@@ -121,6 +122,7 @@ func (d *driver) UnprepareResourceClaims(ctx context.Context, claims []kubeletpl
 	result = make(map[types.UID]error)
 	for _, claim := range claims {
 		logger.V(4).Info("Unpreparing claim", "claim", klog.KRef(claim.Namespace, claim.Name), "uid", claim.UID)
+		// TODO: read/write checkpoint
 		result[claim.UID] = nil
 	}
 	return
