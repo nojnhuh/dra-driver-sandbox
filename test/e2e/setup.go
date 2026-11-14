@@ -21,6 +21,7 @@ import (
 	"helm.sh/helm/v4/pkg/chart/loader"
 	"helm.sh/helm/v4/pkg/cli"
 	"helm.sh/helm/v4/pkg/kube"
+	"helm.sh/helm/v4/pkg/registry"
 	"helm.sh/helm/v4/pkg/release"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -538,11 +539,23 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 		t.Fatal("Error initializing Helm config:", err)
 	}
 
-	calicoCharts := action.ChartPathOptions{
-		RepoURL: "https://docs.tigera.io/calico/charts",
+	registryClient, err := registry.NewClient(
+		registry.ClientOptCredentialsFile(helmEnv.RegistryConfig),
+		registry.ClientOptWriter(t.Output()),
+	)
+	if err != nil {
+		t.Fatal("initialize OCI registry client:", err)
+	}
+
+	// The latest v3.33.1 Calico release is borked.
+	calicoChartVersion := "v3.32.4"
+	if time.Now().After(time.Date(2026, time.November, 18, 0, 0, 0, 0, time.UTC)) {
+		t.Error("Pinned Calico chart version is stale")
 	}
 
 	calicoCRDInstall := action.NewInstall(helmConfig)
+	calicoCRDInstall.SetRegistryClient(registryClient)
+	calicoCRDInstall.Version = calicoChartVersion
 	calicoCRDInstall.Namespace = tigeraOperator.Name
 	calicoCRDInstall.ReleaseName = "calico-crds"
 	// CRDs, though packaged in a Helm chart, cannot be installed by Helm lol.
@@ -550,7 +563,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	//
 	//     create: failed to create: Secret "sh.helm.release.v1.calico-crds.v1" is invalid: data: Too long: may not be more than 1048576 bytes
 	calicoCRDInstall.DryRunStrategy = action.DryRunServer
-	calicoCRDPath, err := calicoCharts.LocateChart("projectcalico.org.v3", helmEnv)
+	calicoCRDPath, err := calicoCRDInstall.LocateChart("oci://quay.io/calico/charts/projectcalico.org.v3", helmEnv)
 	if err != nil {
 		t.Fatal("Error locating Calico CRD chart:", err)
 	}
@@ -578,6 +591,8 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	}
 
 	calicoInstall := action.NewInstall(helmConfig)
+	calicoInstall.SetRegistryClient(registryClient)
+	calicoInstall.Version = calicoChartVersion
 	calicoInstall.ReleaseName = "calico"
 	calicoInstall.Namespace = tigeraOperator.Name
 	calicoInstall.WaitStrategy = kube.StatusWatcherStrategy
@@ -586,7 +601,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 		kube.WithKStatusReaders(&tigeraStatusReader{}),
 	}
 	calicoInstall.Timeout = 5 * time.Minute
-	calicoPath, err := calicoCharts.LocateChart("tigera-operator", helmEnv)
+	calicoPath, err := calicoInstall.LocateChart("oci://quay.io/calico/charts/tigera-operator", helmEnv)
 	if err != nil {
 		t.Fatal("Error locating Calico chart:", err)
 	}
