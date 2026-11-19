@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	resourcev1 "k8s.io/api/resource/v1"
@@ -24,8 +25,14 @@ import (
 	_ "k8s.io/klog/v2/ktesting/init"
 	capiyaml "sigs.k8s.io/cluster-api/util/yaml"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/kustomize/api/types"
 )
+
+func TestMain(m *testing.M) {
+	log.SetLogger(logr.Discard())
+	os.Exit(m.Run())
+}
 
 func TestDriver(t *testing.T) {
 	_, ctx := ktesting.NewTestContext(t)

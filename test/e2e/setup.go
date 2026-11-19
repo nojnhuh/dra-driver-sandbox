@@ -213,6 +213,7 @@ func createManagementCluster(ctx context.Context, t *testing.T) clusterHandle {
 	}
 	client, err := ctrlclient.New(clientConfig, ctrlclient.Options{
 		Scheme: s,
+		Log:    logger,
 	})
 	if err != nil {
 		t.Fatal("Error building Kubernetes client:", err)
@@ -506,6 +507,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	}
 	client, err := ctrlclient.New(clientConfig, ctrlclient.Options{
 		Scheme: s,
+		Log:    logger,
 	})
 	if err != nil {
 		t.Fatal("Error building controller-runtime client:", err)
