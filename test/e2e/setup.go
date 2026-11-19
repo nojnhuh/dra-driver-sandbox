@@ -549,15 +549,8 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 		t.Fatal("initialize OCI registry client:", err)
 	}
 
-	// The latest v3.33.1 Calico release is borked.
-	calicoChartVersion := "v3.32.4"
-	if time.Now().After(time.Date(2026, time.November, 18, 0, 0, 0, 0, time.UTC)) {
-		t.Error("Pinned Calico chart version is stale")
-	}
-
 	calicoCRDInstall := action.NewInstall(helmConfig)
 	calicoCRDInstall.SetRegistryClient(registryClient)
-	calicoCRDInstall.Version = calicoChartVersion
 	calicoCRDInstall.Namespace = tigeraOperator.Name
 	calicoCRDInstall.ReleaseName = "calico-crds"
 	// CRDs, though packaged in a Helm chart, cannot be installed by Helm lol.
@@ -594,7 +587,6 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 
 	calicoInstall := action.NewInstall(helmConfig)
 	calicoInstall.SetRegistryClient(registryClient)
-	calicoInstall.Version = calicoChartVersion
 	calicoInstall.ReleaseName = "calico"
 	calicoInstall.Namespace = tigeraOperator.Name
 	calicoInstall.WaitStrategy = kube.StatusWatcherStrategy
