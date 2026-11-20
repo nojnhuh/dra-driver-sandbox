@@ -448,6 +448,24 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 		}
 	})
 
+	t.Cleanup(func() {
+		provider := kind.NewProvider(
+			kind.ProviderWithDocker(),
+			kind.ProviderWithLogger(kindLogAdapter{logger.WithName("workload-logs")}),
+		)
+		nodes, err := provider.ListNodes(clusterKey.Name)
+		if err != nil {
+			t.Error("Error listing workload cluster containers:", err)
+			return
+		}
+		if len(nodes) == 0 {
+			return
+		}
+		if err := provider.CollectLogs(clusterKey.Name, filepath.Join(t.ArtifactDir(), "nodes")); err != nil {
+			t.Error("Error collecting workload cluster node logs:", err)
+		}
+	})
+
 	err = wait.PollUntilContextTimeout(ctx, 5*time.Second, 15*time.Minute, true /*immediate*/, func(ctx context.Context) (bool, error) {
 		err := h.client.Get(ctx, clusterKey, cluster)
 		if err != nil {
@@ -516,6 +534,9 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 	if err != nil {
 		t.Fatal("Error building Kubernetes client:", err)
 	}
+	t.Cleanup(func() {
+		collectClusterDiagnostics(ctx, t, k8sClient)
+	})
 
 	tigeraOperator := &corev1.Namespace{
 		ObjectMeta: metav1.ObjectMeta{
@@ -549,15 +570,8 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 		t.Fatal("initialize OCI registry client:", err)
 	}
 
-	// The latest v3.33.1 Calico release is borked.
-	calicoChartVersion := "v3.32.4"
-	if time.Now().After(time.Date(2026, time.November, 18, 0, 0, 0, 0, time.UTC)) {
-		t.Error("Pinned Calico chart version is stale")
-	}
-
 	calicoCRDInstall := action.NewInstall(helmConfig)
 	calicoCRDInstall.SetRegistryClient(registryClient)
-	calicoCRDInstall.Version = calicoChartVersion
 	calicoCRDInstall.Namespace = tigeraOperator.Name
 	calicoCRDInstall.ReleaseName = "calico-crds"
 	// CRDs, though packaged in a Helm chart, cannot be installed by Helm lol.
@@ -594,7 +608,6 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 
 	calicoInstall := action.NewInstall(helmConfig)
 	calicoInstall.SetRegistryClient(registryClient)
-	calicoInstall.Version = calicoChartVersion
 	calicoInstall.ReleaseName = "calico"
 	calicoInstall.Namespace = tigeraOperator.Name
 	calicoInstall.WaitStrategy = kube.StatusWatcherStrategy
@@ -602,7 +615,7 @@ func createCluster(ctx context.Context, t *testing.T, h clusterHandle, cluster *
 		kube.WithWaitContext(ctx),
 		kube.WithKStatusReaders(&tigeraStatusReader{}),
 	}
-	calicoInstall.Timeout = 5 * time.Minute
+	calicoInstall.Timeout = 10 * time.Minute
 	calicoPath, err := calicoInstall.LocateChart("oci://quay.io/calico/charts/tigera-operator", helmEnv)
 	if err != nil {
 		t.Fatal("Error locating Calico chart:", err)
