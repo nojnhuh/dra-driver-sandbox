@@ -58,6 +58,8 @@ jobs:
             if ! docker manifest inspect "kindest/node:${version}"; then
               go run sigs.k8s.io/kind build node-image --image "kindest/node:${version}" --type release "${version}"
             fi
+      - name: Increase inotify instance limit for nested nodes
+        run: sudo sysctl -w fs.inotify.max_user_instances=1024
       - name: Run e2e tests
         run: go test -tags=e2e -artifacts -timeout 30m ./test/e2e -run TestDriver/default --kubernetes-version "${{ steps.kind-node.outputs.version }}"
       - name: Collect runner diagnostics
